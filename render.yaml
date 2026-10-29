@@ -1,0 +1,43 @@
+# Render Blueprint for the free-hosting setup (see README → "Free hosting").
+# Render → New → Blueprint → pick this repo. Values marked sync:false are asked for at setup.
+services:
+  - type: web
+    name: tracker
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./deploy/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: RUN_MODE
+        value: cron
+      - key: CRON_SECRET          # paste this into the cron-job.org header X-Cron-Secret
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL         # Supabase → Connect → Session pooler URI
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD_HASH  # from: python -m app.cli hash-password (paste without quotes)
+        sync: false
+      - key: MARKET_DATA_PROVIDER
+        value: upstox
+      - key: UPSTOX_ANALYTICS_TOKEN
+        sync: false
+      - key: UPSTOX_TOKEN_EXPIRES_ON
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_TO
+        sync: false

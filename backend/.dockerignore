@@ -1,0 +1,6 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+tests
+app/marketdata/upstox/proto/*_pb2.py

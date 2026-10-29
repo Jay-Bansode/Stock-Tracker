@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+backend/app/marketdata/upstox/proto/*_pb2.py
+node_modules/
+frontend/dist/
+*.tsbuildinfo
