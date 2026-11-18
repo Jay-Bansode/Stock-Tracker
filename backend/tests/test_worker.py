@@ -7,6 +7,7 @@ from app.db.models import Notification
 from app.notify.base import SendError
 from app.notify.worker import ChannelWorker
 from app.services.alerts import enqueue_system_message, trigger_alert
+from tests.conftest import make_user
 
 
 class FakeSender:
@@ -15,13 +16,13 @@ class FakeSender:
         self.failures = list(failures)
         self.sent = []
 
-    async def send_alert(self, msg):
+    async def send_alert(self, msg, to=None):
         if self.failures:
             raise self.failures.pop(0)
         self.sent.append(msg)
         return f"{self.channel}-{len(self.sent)}"
 
-    async def send_text(self, text):
+    async def send_text(self, text, to=None):
         self.sent.append(text)
         return "txt"
 
@@ -99,10 +100,12 @@ async def test_stale_sending_rows_are_recovered(sm, example):
     assert await worker.process_batch() == 1
 
 
-async def test_system_messages_go_to_telegram_only(sm):
+async def test_system_messages_go_to_admin_telegram_only(sm, owner):
+    await make_user(sm, "someone", telegram_chat_id="999")  # not an admin: gets no notices
     await enqueue_system_message(sm, "feed down", ["TELEGRAM", "WHATSAPP"])
     rows = await _rows(sm)
     assert list(rows) == ["TELEGRAM"] and rows["TELEGRAM"].kind == "SYSTEM"
+    assert rows["TELEGRAM"].recipient == "123"
     sender = FakeSender("TELEGRAM")
     await ChannelWorker(sm, sender, max_attempts=6, min_interval=0).process_batch()
     assert sender.sent == ["feed down"]

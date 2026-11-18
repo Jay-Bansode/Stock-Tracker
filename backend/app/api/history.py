@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.api.schemas import EventOut, EventPage
 from app.config import IST
 from app.db.models import AlertEvent, Notification, NotificationStatus
@@ -18,8 +18,8 @@ from app.notify.formatter import format_ist
 router = APIRouter(tags=["history"])
 
 
-def _filtered(watchlist_id, symbol, date_from, date_to):
-    q = select(AlertEvent)
+def _filtered(user, watchlist_id, symbol, date_from, date_to):
+    q = select(AlertEvent).where(AlertEvent.user_id == user.id)
     if watchlist_id:
         q = q.where(AlertEvent.watchlist_id == watchlist_id)
     if symbol:
@@ -36,6 +36,7 @@ def _filtered(watchlist_id, symbol, date_from, date_to):
 @router.get("/history", response_model=EventPage)
 async def history(
     session: SessionDep,
+    user: CurrentUser,
     watchlist_id: int | None = None,
     symbol: str | None = None,
     date_from: date | None = None,
@@ -43,7 +44,7 @@ async def history(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ):
-    q = _filtered(watchlist_id, symbol, date_from, date_to)
+    q = _filtered(user, watchlist_id, symbol, date_from, date_to)
     total = await session.scalar(select(func.count()).select_from(q.subquery()))
     rows = await session.scalars(
         q.options(selectinload(AlertEvent.notifications))
@@ -62,13 +63,14 @@ async def history(
 @router.get("/history/export.csv")
 async def export_history(
     session: SessionDep,
+    user: CurrentUser,
     watchlist_id: int | None = None,
     symbol: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ):
     rows = await session.scalars(
-        _filtered(watchlist_id, symbol, date_from, date_to)
+        _filtered(user, watchlist_id, symbol, date_from, date_to)
         .options(selectinload(AlertEvent.notifications))
         .order_by(AlertEvent.triggered_at.desc())
     )
@@ -89,8 +91,12 @@ async def export_history(
 
 
 @router.post("/notifications/{notification_id}/retry", status_code=202)
-async def retry_notification(notification_id: int, session: SessionDep):
-    n = await session.get(Notification, notification_id)
+async def retry_notification(notification_id: int, session: SessionDep, user: CurrentUser):
+    n = await session.scalar(
+        select(Notification)
+        .join(AlertEvent, Notification.alert_event_id == AlertEvent.id)
+        .where(Notification.id == notification_id, AlertEvent.user_id == user.id)
+    )
     if n is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Notification not found")
     if n.status == NotificationStatus.SENT:

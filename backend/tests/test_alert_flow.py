@@ -4,12 +4,12 @@ from decimal import Decimal as D
 
 from sqlalchemy import select, update
 
-from app.db.models import Alert, AlertEvent, Notification
+from app.db.models import Alert, AlertEvent, Notification, Watchlist, WatchlistItem
 from app.engine.index import AlertIndex
 from app.engine.processor import AlertProcessor
 from app.marketdata.base import Tick
 from app.services.alerts import trigger_alert
-from tests.conftest import HDFCBANK, RELIANCE
+from tests.conftest import HDFCBANK, RELIANCE, make_user
 
 CHANNELS = ["TELEGRAM", "WHATSAPP"]
 
@@ -117,3 +117,36 @@ async def test_disabled_alert_in_db_is_not_fired_from_stale_index(sm, example):
         await s.commit()
     await proc.process(Tick(RELIANCE, D("1502")))
     assert [e.watchlist_name for e in await _events(sm)] == ["Intraday Stocks"]
+
+
+async def _alert_for(sm, user, key=RELIANCE, target="1500"):
+    async with sm() as s:
+        wl = Watchlist(name=f"{user.username}'s list", user_id=user.id)
+        item = WatchlistItem(watchlist=wl, instrument_key=key)
+        alert = Alert(item=item, condition="ABOVE", target_price=D(target), status="ACTIVE")
+        s.add_all([wl, item, alert])
+        await s.commit()
+        return alert.id
+
+
+async def _notes(sm, event_id):
+    async with sm() as s:
+        rows = await s.scalars(select(Notification).where(Notification.alert_event_id == event_id))
+        return sorted((n.channel, n.recipient) for n in rows)
+
+
+async def test_alerts_go_to_the_owners_own_chat(sm, example, owner):
+    linked = await make_user(sm, "linked", telegram_chat_id="555")
+    unlinked = await make_user(sm, "unlinked")
+
+    admin_event = await trigger_alert(sm, example["Long-Term Stocks"], D("1502"), None, CHANNELS)
+    linked_event = await trigger_alert(sm, await _alert_for(sm, linked), D("1502"), None, CHANNELS)
+    unlinked_event = await trigger_alert(sm, await _alert_for(sm, unlinked), D("1502"), None,
+                                         CHANNELS)
+
+    assert await _notes(sm, admin_event) == [("TELEGRAM", "123"), ("WHATSAPP", None)]
+    assert await _notes(sm, linked_event) == [("TELEGRAM", "555")]  # WhatsApp is admin-only
+    assert await _notes(sm, unlinked_event) == []  # still recorded in their history
+    async with sm() as s:
+        owners = dict((await s.execute(select(AlertEvent.id, AlertEvent.user_id))).all())
+    assert owners == {admin_event: owner.id, linked_event: linked.id, unlinked_event: unlinked.id}

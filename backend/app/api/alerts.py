@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import contains_eager
 
-from app.api.deps import SessionDep, StoreDep
+from app.api.deps import CurrentUser, SessionDep, StoreDep
 from app.api.schemas import (
     AlertIn,
     AlertOut,
@@ -32,12 +32,13 @@ async def _saved(alert: Alert, instrument_key: str, store) -> AlertSaved:
     return out
 
 
-async def _get_alert(session, alert_id: int) -> tuple[Alert, str]:
+async def _get_alert(session, alert_id: int, user) -> tuple[Alert, str]:
     row = (
         await session.execute(
             select(Alert, WatchlistItem.instrument_key)
             .join(WatchlistItem, Alert.watchlist_item_id == WatchlistItem.id)
-            .where(Alert.id == alert_id)
+            .join(Watchlist, WatchlistItem.watchlist_id == Watchlist.id)
+            .where(Alert.id == alert_id, Watchlist.user_id == user.id)
         )
     ).first()
     if row is None:
@@ -48,6 +49,7 @@ async def _get_alert(session, alert_id: int) -> tuple[Alert, str]:
 @router.get("/alerts", response_model=list[AlertWithContext])
 async def list_alerts(
     session: SessionDep,
+    user: CurrentUser,
     alert_status: Annotated[AlertStatus | None, Query(alias="status")] = None,
     watchlist_id: int | None = None,
 ):
@@ -56,6 +58,7 @@ async def list_alerts(
         .join(Alert.item)
         .join(Watchlist, WatchlistItem.watchlist_id == Watchlist.id)
         .options(contains_eager(Alert.item).joinedload(WatchlistItem.instrument))
+        .where(Watchlist.user_id == user.id)
         .order_by(Watchlist.sort_order, Watchlist.id, Alert.id)
     )
     if alert_status:
@@ -76,8 +79,13 @@ async def list_alerts(
 
 
 @router.post("/watchlist-items/{item_id}/alerts", response_model=AlertSaved, status_code=201)
-async def create_alert(item_id: int, body: AlertIn, session: SessionDep, store: StoreDep):
-    item = await session.get(WatchlistItem, item_id)
+async def create_alert(item_id: int, body: AlertIn, session: SessionDep, store: StoreDep,
+                       user: CurrentUser):
+    item = await session.scalar(
+        select(WatchlistItem)
+        .join(Watchlist, WatchlistItem.watchlist_id == Watchlist.id)
+        .where(WatchlistItem.id == item_id, Watchlist.user_id == user.id)
+    )
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Watchlist item not found")
     alert = Alert(watchlist_item_id=item_id, status=AlertStatus.ACTIVE, **body.model_dump())
@@ -89,8 +97,9 @@ async def create_alert(item_id: int, body: AlertIn, session: SessionDep, store: 
 
 
 @router.patch("/alerts/{alert_id}", response_model=AlertSaved)
-async def update_alert(alert_id: int, body: AlertPatch, session: SessionDep, store: StoreDep):
-    alert, key = await _get_alert(session, alert_id)
+async def update_alert(alert_id: int, body: AlertPatch, session: SessionDep, store: StoreDep,
+                       user: CurrentUser):
+    alert, key = await _get_alert(session, alert_id, user)
     changes = body.model_dump(exclude_unset=True)
     redefined = any(
         k in changes and changes[k] != getattr(alert, k) for k in ("condition", "target_price")
@@ -105,8 +114,9 @@ async def update_alert(alert_id: int, body: AlertPatch, session: SessionDep, sto
     return await _saved(alert, key, store)
 
 
-async def _set_status(alert_id: int, new_status: AlertStatus, session, store) -> AlertSaved:
-    alert, key = await _get_alert(session, alert_id)
+async def _set_status(alert_id: int, new_status: AlertStatus, session, store,
+                      user) -> AlertSaved:
+    alert, key = await _get_alert(session, alert_id, user)
     alert.status = new_status
     await notify(session, CHANNEL_ALERTS_CHANGED)
     await session.commit()
@@ -115,18 +125,18 @@ async def _set_status(alert_id: int, new_status: AlertStatus, session, store) ->
 
 
 @router.post("/alerts/{alert_id}/rearm", response_model=AlertSaved)
-async def rearm_alert(alert_id: int, session: SessionDep, store: StoreDep):
-    return await _set_status(alert_id, AlertStatus.ACTIVE, session, store)
+async def rearm_alert(alert_id: int, session: SessionDep, store: StoreDep, user: CurrentUser):
+    return await _set_status(alert_id, AlertStatus.ACTIVE, session, store, user)
 
 
 @router.post("/alerts/{alert_id}/disable", response_model=AlertSaved)
-async def disable_alert(alert_id: int, session: SessionDep, store: StoreDep):
-    return await _set_status(alert_id, AlertStatus.DISABLED, session, store)
+async def disable_alert(alert_id: int, session: SessionDep, store: StoreDep, user: CurrentUser):
+    return await _set_status(alert_id, AlertStatus.DISABLED, session, store, user)
 
 
 @router.delete("/alerts/{alert_id}", status_code=204)
-async def delete_alert(alert_id: int, session: SessionDep):
-    alert, _ = await _get_alert(session, alert_id)
+async def delete_alert(alert_id: int, session: SessionDep, user: CurrentUser):
+    alert, _ = await _get_alert(session, alert_id, user)
     await session.delete(alert)
     await notify(session, CHANNEL_ALERTS_CHANGED)
     await session.commit()

@@ -1,19 +1,14 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import { api } from "../api";
-import { priceStore } from "../prices";
+import { AuthCard, Field, useSignedIn } from "../components/AuthCard";
 
 export default function LoginPage() {
-  const qc = useQueryClient();
-  const [username, setUsername] = useState("admin");
+  const signedIn = useSignedIn();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const login = useMutation({
-    mutationFn: () => api.login(username, password),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      priceStore.reconnect();
-    },
-  });
+  const login = useMutation({ mutationFn: () => api.login(username, password), onSuccess: signedIn });
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -21,31 +16,29 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="grid min-h-screen place-items-center px-4">
-      <form onSubmit={submit} className="card w-full max-w-sm space-y-4 p-6">
-        <div className="flex items-center gap-2">
-          <svg viewBox="0 0 32 32" className="size-8" aria-hidden>
-            <rect width="32" height="32" rx="7" className="fill-teal-700" />
-            <path d="M7 21l6-6 4 4 8-9" stroke="white" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <div>
-            <h1 className="font-semibold">Tracker</h1>
-            <p className="text-xs text-slate-500">Watchlists &amp; price alerts</p>
-          </div>
-        </div>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Username</span>
-          <input className="input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">Password</span>
-          <input className="input" type="password" autoComplete="current-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
-        </label>
-        {login.error && <p className="text-sm text-red-600">{login.error.message}</p>}
-        <button className="btn btn-primary w-full" disabled={login.isPending || !password}>
-          {login.isPending ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-    </div>
+    <AuthCard
+      title="Tracker"
+      onSubmit={submit}
+      footer={
+        <>
+          New here?{" "}
+          <Link to="/register" className="font-medium text-teal-700 hover:underline dark:text-teal-400">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      <Field label="Username or email" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+      <div>
+        <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Link to="/forgot-password" className="mt-1 inline-block text-xs text-teal-700 hover:underline dark:text-teal-400">
+          Forgot password?
+        </Link>
+      </div>
+      {login.error && <p className="text-sm text-red-600">{login.error.message}</p>}
+      <button className="btn btn-primary w-full" disabled={login.isPending || !username || !password}>
+        {login.isPending ? "Signing in…" : "Sign in"}
+      </button>
+    </AuthCard>
   );
 }

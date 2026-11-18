@@ -26,10 +26,10 @@ class WhatsAppSender:
         self._language = language
         self._client = client or httpx.AsyncClient(timeout=20)
 
-    def payload(self, msg: AlertMessage) -> dict:
+    def payload(self, msg: AlertMessage, to: str | None = None) -> dict:
         return {
             "messaging_product": "whatsapp",
-            "to": self._to,
+            "to": to.lstrip("+").replace(" ", "") if to else self._to,
             "type": "template",
             "template": {
                 "name": self._template,
@@ -43,9 +43,10 @@ class WhatsAppSender:
             },
         }
 
-    async def send_alert(self, msg: AlertMessage) -> str:
+    async def send_alert(self, msg: AlertMessage, to: str | None = None) -> str:
         try:
-            resp = await self._client.post(self._url, json=self.payload(msg), headers=self._headers)
+            resp = await self._client.post(self._url, json=self.payload(msg, to),
+                                           headers=self._headers)
         except httpx.HTTPError as exc:
             raise SendError(f"whatsapp network error: {exc!r}", retryable=True) from exc
 
@@ -66,6 +67,6 @@ class WhatsAppSender:
         # e.g. 190 expired token, 132001 template missing/not approved, 131030 recipient not allowed
         raise SendError(detail, retryable=False)
 
-    async def send_text(self, text: str) -> str:
+    async def send_text(self, text: str, to: str | None = None) -> str:
         raise SendError("free-form WhatsApp messages need an open 24h session; "
                         "system messages go to Telegram only", retryable=False)

@@ -21,9 +21,19 @@ services:
         value: "true"
       - key: DATABASE_URL         # Supabase → Connect → Session pooler URI
         sync: false
-      - key: ADMIN_USERNAME
+      - key: ADMIN_USERNAME       # ADMIN_* only creates the first admin account
         value: admin
       - key: ADMIN_PASSWORD_HASH  # from: python -m app.cli hash-password (paste without quotes)
+        sync: false
+      - key: ADMIN_EMAIL          # the admin's email, for "Forgot password"
+        sync: false
+      - key: APP_BASE_URL         # https://<your-service>.onrender.com (used in reset emails)
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: EMAIL_API_KEY        # Brevo → SMTP & API → API keys
+        sync: false
+      - key: EMAIL_FROM           # a sender address verified in Brevo
         sync: false
       - key: MARKET_DATA_PROVIDER
         value: upstox

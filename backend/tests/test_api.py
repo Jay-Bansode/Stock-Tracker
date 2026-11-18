@@ -3,7 +3,20 @@ from decimal import Decimal as D
 import httpx
 import pytest
 
-from app.api.deps import get_redis, get_sm, get_store
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import update
+
+from app.api.deps import (
+    forgot_throttle,
+    get_redis,
+    get_sm,
+    get_store,
+    login_throttle,
+    register_throttle,
+)
+from app.db.models import PasswordResetToken
+from app.notify import email as email_mod
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import create_app
@@ -17,11 +30,14 @@ RELIANCE = "NSE_EQ|INE002A01018"
 
 
 @pytest.fixture
-async def client(sm, redis):
+async def client(sm, redis, owner):
     await ensure_seed_instruments(sm)
+    for throttle in (login_throttle, forgot_throttle, register_throttle):
+        throttle.clear()
+    email_mod.outbox.clear()
     app = create_app()
-    settings = Settings(admin_username="admin", admin_password="pw", secret_key="test-secret-key-that-is-long-enough-for-hs256",
-                        _env_file=None)
+    settings = Settings(secret_key="test-secret-key-that-is-long-enough-for-hs256",
+                        email_provider="console", _env_file=None)
 
     async def session_override():
         async with sm() as s:
@@ -47,7 +63,8 @@ async def test_requires_login(client):
     bad = await client.post("/api/auth/login", json={"username": "admin", "password": "nope"})
     assert bad.status_code == 401
     await _login(client)
-    assert (await client.get("/api/auth/me")).json() == {"username": "admin"}
+    me = (await client.get("/api/auth/me")).json()
+    assert (me["username"], me["is_admin"], me["telegram_linked"]) == ("admin", True, True)
 
 
 async def test_watchlist_alert_history_flow(client, sm, redis):
@@ -109,6 +126,131 @@ async def test_watchlist_alert_history_flow(client, sm, redis):
     hist = (await client.get("/api/history")).json()
     assert hist["items"][0]["watchlist_name"] == "Long-Term Stocks"
     assert hist["items"][0]["alert_id"] is None
+
+
+def _new_client(client):
+    """Same app, separate cookie jar: a second browser."""
+    return httpx.AsyncClient(transport=client._transport, base_url="http://test")
+
+
+async def _register(c, username, password="password1"):
+    r = await c.post("/api/auth/register", json={
+        "username": username, "email": f"{username}@example.com", "password": password})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _reset_tokens():
+    return [next(w for w in m["text"].split() if "token=" in w).split("token=")[1]
+            for m in email_mod.outbox]
+
+
+async def test_register_and_login_by_email(client):
+    async with _new_client(client) as c:
+        me = await _register(c, "Bob")
+        assert (me["username"], me["is_admin"], me["telegram_linked"]) == ("Bob", False, False)
+        assert (await c.get("/api/auth/me")).json()["email"] == "bob@example.com"
+    async with _new_client(client) as c:
+        dup = await c.post("/api/auth/register", json={
+            "username": "bob", "email": "other@example.com", "password": "password1"})
+        assert dup.status_code == 409  # usernames are case-insensitive
+        short = await c.post("/api/auth/register", json={
+            "username": "carol", "email": "carol@example.com", "password": "short"})
+        assert short.status_code == 422
+        r = await c.post("/api/auth/login", json={"username": "BOB@example.com",
+                                                  "password": "password1"})
+        assert r.status_code == 200 and r.json()["username"] == "Bob"
+
+
+async def test_users_only_see_their_own_data(client, sm):
+    await _login(client)
+    wl = (await client.post("/api/watchlists", json={"name": "Mine"})).json()
+    item = (await client.post(f"/api/watchlists/{wl['id']}/items",
+                              json={"instrument_key": RELIANCE})).json()
+    alert = (await client.post(f"/api/watchlist-items/{item['id']}/alerts",
+                               json={"condition": "ABOVE", "target_price": 1500})).json()
+    await trigger_alert(sm, alert["id"], D("1502"), None, ["TELEGRAM"])
+    note_id = (await client.get("/api/history")).json()["items"][0]["notifications"][0]["id"]
+
+    async with _new_client(client) as bob:
+        await _register(bob, "bob")
+        assert (await bob.get("/api/watchlists")).json() == []
+        assert (await bob.get("/api/alerts")).json() == []
+        assert (await bob.get("/api/history")).json()["total"] == 0
+        wl_url = f"/api/watchlists/{wl['id']}"
+        assert (await bob.get(f"{wl_url}/items")).status_code == 404
+        assert (await bob.patch(wl_url, json={"name": "x"})).status_code == 404
+        assert (await bob.delete(wl_url)).status_code == 404
+        assert (await bob.delete(f"{wl_url}/items/{item['id']}")).status_code == 404
+        assert (await bob.post(f"/api/watchlist-items/{item['id']}/alerts",
+                               json={"condition": "ABOVE", "target_price": 1})).status_code == 404
+        assert (await bob.patch(f"/api/alerts/{alert['id']}", json={"note": "x"})).status_code == 404
+        assert (await bob.delete(f"/api/alerts/{alert['id']}")).status_code == 404
+        assert (await bob.post(f"/api/notifications/{note_id}/retry")).status_code == 404
+        assert (await bob.post("/api/dev/ticks", json={"RELIANCE": 1})).status_code == 403
+        # the same watchlist name is fine for a different user
+        assert (await bob.post("/api/watchlists", json={"name": "Mine"})).status_code == 201
+        status = (await bob.get("/api/system/status")).json()
+        assert status["alerts"] == {"active": 0, "triggered": 0, "fired_today": 0}
+    assert len((await client.get("/api/watchlists")).json()) == 1
+
+
+async def test_forgot_and_reset_password(client):
+    async with _new_client(client) as bob:
+        await _register(bob, "bob", "password1")
+        unknown = await bob.post("/api/auth/forgot-password", json={"email": "nobody@example.com"})
+        known = await bob.post("/api/auth/forgot-password", json={"email": "BOB@example.com"})
+        assert unknown.status_code == known.status_code == 202
+        assert unknown.json() == known.json()  # no hint whether the account exists
+        assert [m["to"] for m in email_mod.outbox] == ["bob@example.com"]
+        assert "http://test/reset-password?token=" in email_mod.outbox[0]["text"]
+        [token] = _reset_tokens()
+
+        r = await bob.post("/api/auth/reset-password", json={"token": token, "password": "newpass99"})
+        assert r.status_code == 200
+        again = await bob.post("/api/auth/reset-password",
+                               json={"token": token, "password": "another99"})
+        assert again.status_code == 400  # single use
+        assert (await bob.get("/api/auth/me")).status_code == 200  # signed in by the reset
+
+    async with _new_client(client) as c:
+        old = await c.post("/api/auth/login", json={"username": "bob", "password": "password1"})
+        assert old.status_code == 401
+        new = await c.post("/api/auth/login", json={"username": "bob", "password": "newpass99"})
+        assert new.status_code == 200
+
+
+async def test_reset_signs_out_other_sessions_and_links_expire(client, sm):
+    await _login(client)
+    assert (await client.get("/api/auth/me")).status_code == 200
+    async with _new_client(client) as c:
+        for _ in range(2):
+            await c.post("/api/auth/forgot-password", json={"email": "admin@example.com"})
+        first, second = _reset_tokens()
+        async with sm() as s:
+            await s.execute(update(PasswordResetToken).where(PasswordResetToken.id == 1)
+                            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1)))
+            await s.commit()
+        expired = await c.post("/api/auth/reset-password",
+                               json={"token": first, "password": "newpass99"})
+        assert expired.status_code == 400
+        ok = await c.post("/api/auth/reset-password", json={"token": second, "password": "newpass99"})
+        assert ok.status_code == 200
+    assert (await client.get("/api/auth/me")).status_code == 401  # pre-reset session is dead
+
+
+async def test_change_password_and_email(client):
+    await _login(client)
+    bad = await client.post("/api/auth/change-password",
+                            json={"current_password": "nope", "new_password": "newpass99"})
+    assert bad.status_code == 400
+    ok = await client.post("/api/auth/change-password",
+                           json={"current_password": "pw", "new_password": "newpass99"})
+    assert ok.status_code == 200
+    assert (await client.get("/api/auth/me")).status_code == 200  # this browser stays signed in
+    r = await client.put("/api/account/email",
+                         json={"email": "New@Example.com", "current_password": "newpass99"})
+    assert r.json()["email"] == "new@example.com"
 
 
 async def test_dev_ticks_resolves_symbols(client, redis):

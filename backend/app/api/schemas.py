@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, PlainSerializer
 
 from app.db.models import AlertStatus, Condition, TriggerMode
 
@@ -14,13 +14,50 @@ class ORM(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+Password = Annotated[str, Field(min_length=8, max_length=72)]  # bcrypt ignores bytes past 72
+
+
 class LoginIn(BaseModel):
-    username: str
+    username: str = Field(description="Username or email")
     password: str
 
 
+class RegisterIn(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
+    email: EmailStr
+    password: Password
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+    password: Password
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: Password
+
+
+class ChangeEmailIn(BaseModel):
+    email: EmailStr
+    current_password: str
+
+
 class Me(BaseModel):
+    id: int
     username: str
+    email: str
+    is_admin: bool
+    telegram_linked: bool
+
+    @classmethod
+    def of(cls, user) -> "Me":
+        return cls(id=user.id, username=user.username, email=user.email,
+                   is_admin=user.is_admin, telegram_linked=bool(user.telegram_chat_id))
 
 
 class InstrumentOut(ORM):

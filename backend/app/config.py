@@ -26,12 +26,25 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://tracker:tracker@localhost:55432/tracker"
     redis_url: str = "redis://localhost:56379/0"
 
-    # Dashboard auth (single user)
+    # Dashboard auth. Users live in the database; ADMIN_* only seeds the first admin account
+    # (migration 0003) and is not read after that.
     secret_key: str = "change-me-please"
     admin_username: str = "admin"
     admin_password_hash: str = ""
     admin_password: str = ""  # plain-text fallback for local dev; prefer ADMIN_PASSWORD_HASH
+    admin_email: str = ""
+    registration_enabled: bool = True
     session_ttl_hours: int = 72
+    # Public URL used in password-reset emails; defaults to the URL the request came in on.
+    app_base_url: str = ""
+    reset_token_ttl_minutes: int = 30
+
+    # Email (password resets). "console" only logs the message, for local development.
+    email_provider: Literal["console", "brevo"] = "console"
+    email_api_key: str = ""
+    email_from: str = ""
+    email_from_name: str = "Tracker"
+    brevo_api_base: str = "https://api.brevo.com"
     cookie_secure: bool = False
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
@@ -57,7 +70,7 @@ class Settings(BaseSettings):
 
     # Notifications
     telegram_bot_token: str = ""
-    telegram_chat_id: str = ""
+    telegram_chat_id: str = ""  # seeds the admin's chat; other users link theirs in Settings
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
     whatsapp_to: str = ""
@@ -89,7 +102,8 @@ class Settings(BaseSettings):
 
     @property
     def telegram_enabled(self) -> bool:
-        return bool(self.telegram_bot_token and self.telegram_chat_id)
+        """The bot is configured. Each user's chat id is stored on their account."""
+        return bool(self.telegram_bot_token)
 
     @property
     def whatsapp_enabled(self) -> bool:

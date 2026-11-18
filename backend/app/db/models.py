@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -59,6 +60,38 @@ def _ts(**kw) -> Mapped[datetime]:
     return mapped_column(DateTime(timezone=True), server_default=func.now(), **kw)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(32))
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # stored lowercased
+    password_hash: Mapped[str] = mapped_column(String(100))
+    # Part of every session token: bumping it signs the user out everywhere.
+    password_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(32))
+    telegram_link_code: Mapped[str | None] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = _ts(onupdate=func.now())
+
+    __table_args__ = (Index("uq_users_username_lower", func.lower(username), unique=True),)
+
+
+class PasswordResetToken(Base):
+    """Single-use reset link. Only the SHA-256 of the token is stored; the token itself exists
+    only in the email."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _ts()
+
+
 class Instrument(Base):
     __tablename__ = "instruments"
 
@@ -78,7 +111,8 @@ class Watchlist(Base):
     __tablename__ = "watchlists"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = _ts()
@@ -87,6 +121,8 @@ class Watchlist(Base):
     items: Mapped[list["WatchlistItem"]] = relationship(
         back_populates="watchlist", cascade="all, delete-orphan", passive_deletes=True
     )
+
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
 
 class WatchlistItem(Base):
@@ -144,6 +180,9 @@ class AlertEvent(Base):
     __tablename__ = "alert_events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     alert_id: Mapped[int | None] = mapped_column(
         ForeignKey("alerts.id", ondelete="SET NULL"), index=True
     )
@@ -174,6 +213,8 @@ class Notification(Base):
     )
     kind: Mapped[str] = mapped_column(String(8), default=NotificationKind.ALERT)
     channel: Mapped[str] = mapped_column(String(10))
+    # Destination snapshotted at queue time (Telegram chat id); None = the sender's default.
+    recipient: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(10), default=NotificationStatus.PENDING)
     body: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

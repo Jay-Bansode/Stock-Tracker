@@ -13,24 +13,27 @@ API = "https://api.telegram.org"
 class TelegramSender:
     channel = "TELEGRAM"
 
-    def __init__(self, token: str, chat_id: str, client: httpx.AsyncClient | None = None,
+    def __init__(self, token: str, chat_id: str = "", client: httpx.AsyncClient | None = None,
                  api_base: str = API):
         self._url = f"{api_base.rstrip('/')}/bot{token}/sendMessage"
-        self._chat_id = chat_id
+        self._chat_id = chat_id  # default destination when a message has no recipient
         self._client = client or httpx.AsyncClient(timeout=15)
 
-    async def send_alert(self, msg: AlertMessage) -> str:
-        return await self._send(msg.telegram_html())
+    async def send_alert(self, msg: AlertMessage, to: str | None = None) -> str:
+        return await self._send(msg.telegram_html(), to)
 
-    async def send_text(self, text: str) -> str:
-        return await self._send(html.escape(text))
+    async def send_text(self, text: str, to: str | None = None) -> str:
+        return await self._send(html.escape(text), to)
 
-    async def _send(self, html_text: str) -> str:
+    async def _send(self, html_text: str, to: str | None) -> str:
+        chat_id = to or self._chat_id
+        if not chat_id:
+            raise SendError("no Telegram chat to send to", retryable=False)
         try:
             resp = await self._client.post(
                 self._url,
                 json={
-                    "chat_id": self._chat_id,
+                    "chat_id": chat_id,
                     "text": html_text,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
@@ -58,6 +61,52 @@ def _json(resp: httpx.Response) -> dict:
         return resp.json()
     except ValueError:
         return {}
+
+
+class TelegramLinkError(Exception):
+    pass
+
+
+_bot_usernames: dict[str, str] = {}
+
+
+async def bot_username(token: str, api_base: str = API) -> str:
+    """The bot's @username (cached), needed for t.me deep links."""
+    if token not in _bot_usernames:
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.get(f"{api_base.rstrip('/')}/bot{token}/getMe")
+            except httpx.HTTPError as exc:
+                raise TelegramLinkError(f"could not reach Telegram: {exc!r}") from exc
+        body = _json(resp)
+        if not body.get("ok"):
+            raise TelegramLinkError(f"Telegram rejected the bot token: {body.get('description')}")
+        _bot_usernames[token] = body["result"]["username"]
+    return _bot_usernames[token]
+
+
+async def find_start_code(token: str, code: str, api_base: str = API) -> str | None:
+    """Return the chat id that sent `/start <code>` to the bot, if any.
+
+    Reads the most recent 100 updates. A negative offset also tells Telegram to forget older
+    ones, so the queue never fills up with stale /start messages.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(f"{api_base.rstrip('/')}/bot{token}/getUpdates",
+                                    params={"offset": -100, "allowed_updates": '["message"]'})
+        except httpx.HTTPError as exc:
+            raise TelegramLinkError(f"could not reach Telegram: {exc!r}") from exc
+    body = _json(resp)
+    if not body.get("ok"):
+        # 409 = a webhook is set on this bot, which disables getUpdates.
+        raise TelegramLinkError(f"Telegram error: {body.get('description') or resp.status_code}")
+    for update in reversed(body.get("result", [])):
+        message = update.get("message") or {}
+        text = (message.get("text") or "").strip()
+        if text == f"/start {code}" and message.get("chat", {}).get("id") is not None:
+            return str(message["chat"]["id"])
+    return None
 
 
 async def find_chat_ids(token: str) -> None:
