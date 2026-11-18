@@ -89,16 +89,16 @@ class ChannelWorker:
             if n is None:  # its event was deleted in the meantime
                 return
             attempts = n.attempts
-            kind, body, event = n.kind, n.body, n.event
+            kind, body, event, to = n.kind, n.body, n.event, n.recipient
 
         await self._pace()
         try:
             if kind == NotificationKind.ALERT:
                 if event is None:
                     raise SendError("alert event no longer exists", retryable=False)
-                provider_id = await self._sender.send_alert(AlertMessage.from_event(event))
+                provider_id = await self._sender.send_alert(AlertMessage.from_event(event), to=to)
             else:
-                provider_id = await self._sender.send_text(body or "")
+                provider_id = await self._sender.send_text(body or "", to=to)
         except SendError as exc:
             await self._failed(nid, attempts, exc)
             return

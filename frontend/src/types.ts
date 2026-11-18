@@ -137,6 +137,17 @@ export interface SystemStatus {
   upstox_token_set: boolean;
   upstox_token_expires_on: string | null;
   upstox_token_days_left: number | null;
+  /** Whether alerts can reach the signed-in user on each channel. */
   channels: { TELEGRAM: boolean; WHATSAPP: boolean };
+  /** The server has a Telegram bot, so users can connect their chat. */
+  telegram_bot?: boolean;
   alerts: { active: number; triggered: number; fired_today: number };
+}
+
+export interface Me {
+  id: number;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  telegram_linked: boolean;
 }

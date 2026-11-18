@@ -9,8 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
-from app.api import alerts, auth, cron, history, instruments, system, watchlists, ws
-from app.api.deps import require_user
+from app.api import account, alerts, auth, cron, history, instruments, system, watchlists, ws
+from app.api.deps import current_user
 from app.config import get_settings
 from app.db.session import get_sessionmaker
 from app.logging_setup import setup_logging
@@ -78,8 +78,8 @@ def create_app() -> FastAPI:
 
     api = APIRouter(prefix="/api")
     api.include_router(auth.router)
-    protected = [Depends(require_user)]
-    for module in (watchlists, alerts, instruments, history, system):
+    protected = [Depends(current_user)]
+    for module in (account, watchlists, alerts, instruments, history, system):
         api.include_router(module.router, dependencies=protected)
     if settings.run_mode == "cron":
         api.include_router(cron.router)  # guarded by X-Cron-Secret, not the login cookie

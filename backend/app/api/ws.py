@@ -6,6 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.deps import COOKIE_NAME, user_from_token
 from app.config import get_settings
+from app.db.session import get_sessionmaker
 from app.marketdata.cache import TICKS_CHANNEL, get_prices
 
 router = APIRouter()
@@ -18,7 +19,9 @@ FLUSH_SECONDS = 1.0  # at most one update per instrument per second to the brows
 async def prices_ws(ws: WebSocket):
     """Client sends {"subscribe": [instrument_key, ...]} (replacing the previous set) and receives
     {"type": "snapshot"|"ticks", "prices": [{k, p, c, t}, ...]}."""
-    if user_from_token(get_settings(), ws.cookies.get(COOKIE_NAME)) is None:
+    async with get_sessionmaker()() as session:
+        user = await user_from_token(session, get_settings(), ws.cookies.get(COOKIE_NAME))
+    if user is None:
         await ws.close(code=4401)
         return
     redis = ws.app.state.redis

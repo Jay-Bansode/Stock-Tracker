@@ -67,9 +67,41 @@ Open **http://localhost:8080** and sign in with `admin` / `admin`.
 With `SIMULATED_RANDOM_WALK=true`, prices drift slightly every second. Set it to `false` if you
 only want the prices you push.
 
-Before using it for real, change the login: run `docker compose run --rm api python -m app.cli
-hash-password`, put the printed `ADMIN_PASSWORD_HASH='…'` line (keep the single quotes) in `.env`,
-remove `ADMIN_PASSWORD`, and set a long random `SECRET_KEY`.
+Before using it for real, change the admin password in **Settings → Account** and set a long
+random `SECRET_KEY` in `.env`.
+
+## Accounts
+
+Anyone can create an account from the sign-in page (set `REGISTRATION_ENABLED=false` to stop
+new sign-ups). Each user has their **own** watchlists, alerts and history, and gets alerts in
+**their own** Telegram chat. Stock search and prices are shared.
+
+- **The admin:** when the database is first set up (or upgraded from the single-user version),
+  `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` (or `ADMIN_PASSWORD`) / `ADMIN_EMAIL` create the
+  admin account, and any existing watchlists and history become theirs. After that these
+  variables are not read again. Only the admin gets WhatsApp alerts and system notices (feed
+  down, token expiring), and only the admin can use the simulator.
+- **Forgot password:** the sign-in page emails a reset link, valid for 30 minutes and usable
+  once. Resetting signs the user out everywhere else. See [Email setup](#email-setup).
+- **Locked out with no email set up:**
+  `docker compose run --rm api python -m app.cli set-password <username>`
+  (on your machine: `cd backend && .venv\Scripts\python -m app.cli set-password <username>`
+  with `DATABASE_URL` pointing at the database).
+
+## Email setup
+
+Reset links are sent through [Brevo](https://www.brevo.com)'s free HTTP API (300 emails/day).
+It uses HTTPS rather than SMTP, so it also works on Render's free tier, which blocks SMTP.
+
+1. Create a free Brevo account.
+2. **Senders, Domains & Dedicated IPs → Senders → Add a sender** and verify the address you
+   want emails to come from (e.g. your Gmail address).
+3. **SMTP & API → API keys → Generate a new API key**.
+4. Set `EMAIL_PROVIDER=brevo`, `EMAIL_API_KEY=<key>`, `EMAIL_FROM=<verified sender>` and
+   `APP_BASE_URL=<the address you open the dashboard at>`.
+
+With the default `EMAIL_PROVIDER=console`, nothing is sent and the reset link is printed in the
+API log instead, which is handy for local testing.
 
 After any `.env` change: `docker compose up -d` (it recreates only the services that changed).
 
@@ -103,17 +135,16 @@ How the live feed behaves:
 
 ## Telegram setup
 
-1. In Telegram, message **@BotFather** → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN`.
-2. Open your new bot and press **Start** (or send any message).
-3. Find your chat id:
-   ```bash
-   docker compose run --rm api python -m app.notify.telegram
-   # TELEGRAM_CHAT_ID=123456789    (yourname)
-   ```
-4. Put `TELEGRAM_CHAT_ID` in `.env`, `docker compose up -d`, then **Settings → Telegram → Send test**.
+One bot serves every user; each user connects their own chat.
 
-To send alerts to a group instead, add the bot to the group, post a message there, and use the
-(negative) group id the helper prints.
+1. In Telegram, message **@BotFather** → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN`,
+   then `docker compose up -d`.
+2. Each user: **Settings → Telegram alerts → Connect Telegram**. This opens the bot; press
+   **Start**, come back and click **I've pressed Start**. Then use **Send test**.
+
+Users who haven't connected Telegram still see their alerts fire in **History**; no message is
+sent. Don't set a webhook on the bot: connecting reads the bot's recent messages
+(`getUpdates`), which Telegram disables while a webhook is set.
 
 ## WhatsApp setup (Meta WhatsApp Cloud API)
 
@@ -227,7 +258,10 @@ no activity, and the minute-by-minute checks keep it active on trading weeks.
 2. Fill in the values it asks for:
    - **DATABASE_URL:** the Supabase URI from step 2.
    - **ADMIN_PASSWORD_HASH:** run `cd backend && .venv\Scripts\python -m app.cli hash-password`
-     locally and paste the hash **without** the surrounding quotes.
+     locally and paste the hash **without** the surrounding quotes. With `ADMIN_EMAIL`, this
+     creates the admin account on the first deploy. After that, change the password in the app.
+   - **Email (password resets):** `EMAIL_API_KEY`, `EMAIL_FROM` and `APP_BASE_URL`; see
+     [Email setup](#email-setup).
    - **Upstox / Telegram / WhatsApp:** the same values as your `.env`.
      - `UPSTOX_TOKEN_EXPIRES_ON` accepts `29/09/2027`.
      - Leave the WhatsApp fields empty if you haven't set it up yet.
@@ -258,7 +292,8 @@ delivered.
 - **Settings** shows *Mode: Free hosting* and the time and result of the **Last check**.
   - The header turns red if checks stop during market hours.
   - Use the job's **Test run** button in cron-job.org to trigger a check without waiting.
-- **Settings → Telegram → Send test** confirms notifications work from the hosted app.
+- **Settings → Telegram alerts → Send test** confirms notifications work from the hosted app.
+- **Forgot password?** on the sign-in page confirms email works.
 
 To try cron mode without Upstox, set `MARKET_DATA_PROVIDER=simulated` and use
 **Settings → Simulator**.
@@ -295,4 +330,5 @@ Tests cover:
 - Telegram/WhatsApp error handling
 - protobuf decoding and the Upstox client (subscribe, reconnect + re-authorize, subscription
   diffs) against a fake WebSocket server
-- the HTTP API
+- the HTTP API, accounts (registration, password reset, sessions signed out by a reset) and
+  per-user isolation of watchlists, alerts and history

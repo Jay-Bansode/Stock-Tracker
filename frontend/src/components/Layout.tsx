@@ -100,6 +100,7 @@ export default function Layout({ username, children }: { username: string; child
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <FeedIndicator />
+            <span className="hidden text-sm text-slate-600 sm:inline dark:text-slate-300">{username}</span>
             <button className="btn btn-sm" onClick={logout} title={`Signed in as ${username}`}>
               Sign out
             </button>

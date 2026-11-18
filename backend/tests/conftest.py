@@ -9,6 +9,7 @@ import os
 from decimal import Decimal
 
 import asyncpg
+import bcrypt
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -16,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db.models import Alert, Instrument, Watchlist, WatchlistItem
+from app.db.models import Alert, Instrument, User, Watchlist, WatchlistItem
 
 ADMIN_DSN = os.environ.get("TEST_ADMIN_DSN", "postgresql://tracker:tracker@localhost:55432/tracker")
 TEST_DB = "tracker_test"
@@ -25,7 +26,7 @@ TEST_REDIS = os.environ.get("TEST_REDIS_URL", "redis://localhost:56379/15")
 BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 
 TABLES = ("notifications, alert_events, alerts, watchlist_items, watchlists, instruments, "
-          "quotes, system_state")
+          "quotes, system_state, password_reset_tokens, users")
 
 
 async def _prepare_database() -> None:
@@ -78,8 +79,27 @@ RELIANCE = "NSE_EQ|INE002A01018"
 HDFCBANK = "NSE_EQ|INE040A01034"
 
 
+def fast_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=4)).decode()
+
+
+async def make_user(sm, username: str, password: str = "password1", **kw) -> User:
+    async with sm() as s:
+        user = User(username=username, email=kw.pop("email", f"{username}@example.com"),
+                    password_hash=fast_hash(password), **kw)
+        s.add(user)
+        await s.commit()
+        return user
+
+
 @pytest.fixture
-async def example(sm):
+async def owner(sm):
+    """The admin (login admin / pw) with a linked Telegram chat: gets Telegram + WhatsApp alerts."""
+    return await make_user(sm, "admin", "pw", is_admin=True, telegram_chat_id="123")
+
+
+@pytest.fixture
+async def example(sm, owner):
     """The scenario from the requirements: Reliance in two watchlists, HDFC Bank in a third."""
     async with sm() as s:
         s.add_all([
@@ -96,7 +116,7 @@ async def example(sm):
             ("Intraday Stocks", RELIANCE, "1480"),
             ("Banking Stocks", HDFCBANK, "1700"),
         ]:
-            wl = Watchlist(name=name)
+            wl = Watchlist(name=name, user_id=owner.id)
             item = WatchlistItem(watchlist=wl, instrument_key=key)
             alert = Alert(item=item, condition="ABOVE", target_price=Decimal(target),
                           trigger_mode="ONCE", status="ACTIVE")

@@ -4,14 +4,21 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import Field
 from sqlalchemy import case, func, select
 
-from app.api.deps import RedisDep, SessionDep, SettingsDep, SmDep
+from app.api.deps import CurrentUser, RedisDep, SessionDep, SettingsDep, SmDep, require_admin
 from app.api.schemas import TestNotificationIn
 from app.config import IST
-from app.db.models import Alert, AlertEvent, AlertStatus, Instrument
+from app.db.models import (
+    Alert,
+    AlertEvent,
+    AlertStatus,
+    Instrument,
+    Watchlist,
+    WatchlistItem,
+)
 from app.engine.poll import STATUS_KEY, get_runtime
 from app.marketdata.base import Tick, to_price
 from app.marketdata.cache import DEV_TICKS_CHANNEL, ENGINE_STATUS_KEY
@@ -25,7 +32,7 @@ router = APIRouter(tags=["system"])
 
 @router.get("/system/status")
 async def system_status(session: SessionDep, redis: RedisDep, settings: SettingsDep,
-                        sm: SmDep):
+                        sm: SmDep, user: CurrentUser):
     engine = poll = None
     if settings.run_mode == "cron":
         poll = await PgStore(sm).read_state(STATUS_KEY)
@@ -46,11 +53,15 @@ async def system_status(session: SessionDep, redis: RedisDep, settings: Settings
                 func.count(case((Alert.status == AlertStatus.ACTIVE, 1))),
                 func.count(case((Alert.status == AlertStatus.TRIGGERED, 1))),
             )
+            .join(WatchlistItem, Alert.watchlist_item_id == WatchlistItem.id)
+            .join(Watchlist, WatchlistItem.watchlist_id == Watchlist.id)
+            .where(Watchlist.user_id == user.id)
         )
     ).one()
     today = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
     fired_today = await session.scalar(
-        select(func.count()).select_from(AlertEvent).where(AlertEvent.triggered_at >= today)
+        select(func.count()).select_from(AlertEvent)
+        .where(AlertEvent.user_id == user.id, AlertEvent.triggered_at >= today)
     )
     expires = settings.upstox_token_expires_on
     return {
@@ -61,27 +72,37 @@ async def system_status(session: SessionDep, redis: RedisDep, settings: Settings
         "upstox_token_set": bool(settings.upstox_analytics_token),
         "upstox_token_expires_on": expires.isoformat() if expires else None,
         "upstox_token_days_left": (expires - datetime.now(IST).date()).days if expires else None,
+        # Whether alerts can reach *this* user on each channel.
         "channels": {
-            "TELEGRAM": settings.telegram_enabled,
-            "WHATSAPP": settings.whatsapp_enabled,
+            "TELEGRAM": settings.telegram_enabled and bool(user.telegram_chat_id),
+            "WHATSAPP": settings.whatsapp_enabled and user.is_admin,
         },
+        "telegram_bot": settings.telegram_enabled,
         "alerts": {"active": counts[0], "triggered": counts[1], "fired_today": fired_today or 0},
     }
 
 
 @router.post("/system/test-notification")
-async def test_notification(body: TestNotificationIn, settings: SettingsDep):
-    sender = build_senders(settings).get(body.channel.upper())
+async def test_notification(body: TestNotificationIn, settings: SettingsDep, user: CurrentUser):
+    channel = body.channel.upper()
+    sender = build_senders(settings).get(channel)
     if sender is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{body.channel} is not configured")
+    to = None
+    if channel == "TELEGRAM":
+        if not user.telegram_chat_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Connect your Telegram first")
+        to = user.telegram_chat_id
+    elif not user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{body.channel} alerts are admin-only")
     try:
-        message_id = await sender.send_alert(sample_message())
+        message_id = await sender.send_alert(sample_message(), to=to)
     except SendError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
     return {"ok": True, "provider_message_id": message_id}
 
 
-@router.post("/dev/ticks")
+@router.post("/dev/ticks", dependencies=[Depends(require_admin)])
 async def inject_ticks(session: SessionDep, redis: RedisDep, settings: SettingsDep, sm: SmDep,
                        prices: dict[str, Annotated[Decimal, Field(gt=0)]] = Body(
                            examples=[{"RELIANCE": 1502, "NSE_EQ|INE040A01034": 1650.5}])):

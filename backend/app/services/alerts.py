@@ -16,6 +16,7 @@ from app.db.models import (
     NotificationStatus,
     SystemState,
     TriggerMode,
+    User,
     Watchlist,
     WatchlistItem,
 )
@@ -34,6 +35,9 @@ async def trigger_alert(
     The conditional UPDATE is the dedupe guarantee: concurrent or repeated ticks race on the row
     lock, and only the transaction that flips ACTIVE -> TRIGGERED gets a row back. The history
     event and one outbox row per channel are written in that same transaction.
+
+    `channels` are the channels configured on the server. Messages go to the watchlist owner:
+    Telegram to the chat they linked, WhatsApp (single fixed number) only for admins.
     """
     async with sm() as session, session.begin():
         won = await session.scalar(
@@ -53,15 +57,17 @@ async def trigger_alert(
 
         ctx = (
             await session.execute(
-                select(Alert, Watchlist, Instrument)
+                select(Alert, Watchlist, Instrument, User)
                 .join(WatchlistItem, Alert.watchlist_item_id == WatchlistItem.id)
                 .join(Watchlist, WatchlistItem.watchlist_id == Watchlist.id)
                 .join(Instrument, WatchlistItem.instrument_key == Instrument.instrument_key)
+                .join(User, Watchlist.user_id == User.id)
                 .where(Alert.id == alert_id)
             )
         ).one()
-        alert, watchlist, instrument = ctx
+        alert, watchlist, instrument, owner = ctx
         event = AlertEvent(
+            user_id=owner.id,
             alert_id=alert.id,
             watchlist_id=watchlist.id,
             watchlist_name=watchlist.name,
@@ -75,18 +81,29 @@ async def trigger_alert(
         )
         session.add(event)
         await session.flush()
-        for channel in channels:
+        destinations = _destinations(owner, channels)
+        for channel, recipient in destinations:
             session.add(
                 Notification(
                     alert_event_id=event.id,
                     kind=NotificationKind.ALERT,
                     channel=channel,
+                    recipient=recipient,
                     status=NotificationStatus.PENDING,
                 )
             )
-        if channels:
+        if destinations:
             await notify(session, CHANNEL_OUTBOX)
         return event.id
+
+
+def _destinations(owner: User, channels: list[str]) -> list[tuple[str, str | None]]:
+    out: list[tuple[str, str | None]] = []
+    if "TELEGRAM" in channels and owner.telegram_chat_id:
+        out.append(("TELEGRAM", owner.telegram_chat_id))
+    if "WHATSAPP" in channels and owner.is_admin:
+        out.append(("WHATSAPP", None))  # the sender's configured WHATSAPP_TO
+    return out
 
 
 async def rearm_repeat_alert(sm: async_sessionmaker[AsyncSession], alert_id: int) -> bool:
@@ -124,19 +141,27 @@ async def send_system_once(sm: async_sessionmaker[AsyncSession], reason: str, te
 
 async def enqueue_system_message(sm: async_sessionmaker[AsyncSession], text: str,
                                  channels: list[str]) -> None:
-    """Operational messages (feed down, token expiring). Telegram only: WhatsApp business-initiated
-    messages must use an approved template."""
-    channels = [c for c in channels if c == "TELEGRAM"]
-    if not channels:
+    """Operational messages (feed down, token expiring) for the admins' Telegram chats only:
+    WhatsApp business-initiated messages must use an approved template."""
+    if "TELEGRAM" not in channels:
         return
     async with sm() as session, session.begin():
-        for channel in channels:
+        chats = (
+            await session.scalars(
+                select(User.telegram_chat_id)
+                .where(User.is_admin, User.telegram_chat_id.is_not(None))
+                .distinct()
+            )
+        ).all()
+        for chat_id in chats:
             session.add(
                 Notification(
                     kind=NotificationKind.SYSTEM,
-                    channel=channel,
+                    channel="TELEGRAM",
+                    recipient=chat_id,
                     status=NotificationStatus.PENDING,
                     body=text,
                 )
             )
-        await notify(session, CHANNEL_OUTBOX)
+        if chats:
+            await notify(session, CHANNEL_OUTBOX)

@@ -3,7 +3,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.api.schemas import ItemIn, ItemOut, OrderIn, WatchlistIn, WatchlistOut, WatchlistPatch
 from app.db.models import Alert, AlertStatus, Instrument, Watchlist, WatchlistItem
 from app.db.session import CHANNEL_ALERTS_CHANGED, notify
@@ -11,15 +11,16 @@ from app.db.session import CHANNEL_ALERTS_CHANGED, notify
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 
 
-async def _get_watchlist(session, watchlist_id: int) -> Watchlist:
+async def _get_watchlist(session, watchlist_id: int, user) -> Watchlist:
+    """The user's own watchlist; someone else's is reported as not found."""
     wl = await session.get(Watchlist, watchlist_id)
-    if wl is None:
+    if wl is None or wl.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Watchlist not found")
     return wl
 
 
 @router.get("", response_model=list[WatchlistOut])
-async def list_watchlists(session: SessionDep):
+async def list_watchlists(session: SessionDep, user: CurrentUser):
     items = (
         select(WatchlistItem.watchlist_id, func.count().label("n"))
         .group_by(WatchlistItem.watchlist_id)
@@ -44,6 +45,7 @@ async def list_watchlists(session: SessionDep):
         )
         .outerjoin(items, items.c.watchlist_id == Watchlist.id)
         .outerjoin(alerts, alerts.c.watchlist_id == Watchlist.id)
+        .where(Watchlist.user_id == user.id)
         .order_by(Watchlist.sort_order, Watchlist.id)
     )
     out = []
@@ -55,9 +57,13 @@ async def list_watchlists(session: SessionDep):
 
 
 @router.post("", response_model=WatchlistOut, status_code=201)
-async def create_watchlist(body: WatchlistIn, session: SessionDep):
-    max_order = await session.scalar(select(func.coalesce(func.max(Watchlist.sort_order), 0)))
-    wl = Watchlist(name=body.name.strip(), description=body.description, sort_order=max_order + 1)
+async def create_watchlist(body: WatchlistIn, session: SessionDep, user: CurrentUser):
+    max_order = await session.scalar(
+        select(func.coalesce(func.max(Watchlist.sort_order), 0))
+        .where(Watchlist.user_id == user.id)
+    )
+    wl = Watchlist(user_id=user.id, name=body.name.strip(), description=body.description,
+                   sort_order=max_order + 1)
     session.add(wl)
     try:
         await session.commit()
@@ -67,17 +73,18 @@ async def create_watchlist(body: WatchlistIn, session: SessionDep):
 
 
 @router.put("/order", status_code=204)
-async def reorder_watchlists(body: OrderIn, session: SessionDep):
+async def reorder_watchlists(body: OrderIn, session: SessionDep, user: CurrentUser):
     for position, wl_id in enumerate(body.ids):
         wl = await session.get(Watchlist, wl_id)
-        if wl:
+        if wl and wl.user_id == user.id:
             wl.sort_order = position
     await session.commit()
 
 
 @router.patch("/{watchlist_id}", response_model=WatchlistOut)
-async def update_watchlist(watchlist_id: int, body: WatchlistPatch, session: SessionDep):
-    wl = await _get_watchlist(session, watchlist_id)
+async def update_watchlist(watchlist_id: int, body: WatchlistPatch, session: SessionDep,
+                           user: CurrentUser):
+    wl = await _get_watchlist(session, watchlist_id, user)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(wl, field, value.strip() if field == "name" else value)
     try:
@@ -89,16 +96,16 @@ async def update_watchlist(watchlist_id: int, body: WatchlistPatch, session: Ses
 
 
 @router.delete("/{watchlist_id}", status_code=204)
-async def delete_watchlist(watchlist_id: int, session: SessionDep):
-    wl = await _get_watchlist(session, watchlist_id)
+async def delete_watchlist(watchlist_id: int, session: SessionDep, user: CurrentUser):
+    wl = await _get_watchlist(session, watchlist_id, user)
     await session.delete(wl)
     await notify(session, CHANNEL_ALERTS_CHANGED)
     await session.commit()
 
 
 @router.get("/{watchlist_id}/items", response_model=list[ItemOut])
-async def list_items(watchlist_id: int, session: SessionDep):
-    await _get_watchlist(session, watchlist_id)
+async def list_items(watchlist_id: int, session: SessionDep, user: CurrentUser):
+    await _get_watchlist(session, watchlist_id, user)
     items = await session.scalars(
         select(WatchlistItem)
         .where(WatchlistItem.watchlist_id == watchlist_id)
@@ -113,8 +120,8 @@ async def list_items(watchlist_id: int, session: SessionDep):
 
 
 @router.post("/{watchlist_id}/items", response_model=ItemOut, status_code=201)
-async def add_item(watchlist_id: int, body: ItemIn, session: SessionDep):
-    await _get_watchlist(session, watchlist_id)
+async def add_item(watchlist_id: int, body: ItemIn, session: SessionDep, user: CurrentUser):
+    await _get_watchlist(session, watchlist_id, user)
     if await session.get(Instrument, body.instrument_key) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown instrument")
     item = WatchlistItem(watchlist_id=watchlist_id, instrument_key=body.instrument_key,
@@ -135,7 +142,8 @@ async def add_item(watchlist_id: int, body: ItemIn, session: SessionDep):
 
 
 @router.delete("/{watchlist_id}/items/{item_id}", status_code=204)
-async def remove_item(watchlist_id: int, item_id: int, session: SessionDep):
+async def remove_item(watchlist_id: int, item_id: int, session: SessionDep, user: CurrentUser):
+    await _get_watchlist(session, watchlist_id, user)
     item = await session.get(WatchlistItem, item_id)
     if item is None or item.watchlist_id != watchlist_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Item not found")

@@ -31,7 +31,8 @@ function mockServer() {
         return json(204, null);
       }
       if (!server.signedIn) return json(401, { detail: "Not signed in" });
-      if (url === "/api/auth/me") return json(200, { username: "admin" });
+      if (url === "/api/auth/me")
+        return json(200, { id: 1, username: "admin", email: "admin@example.com", is_admin: true, telegram_linked: false });
       if (url === "/api/system/status") return json(200, status);
       throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`);
     }),
@@ -39,10 +40,10 @@ function mockServer() {
   return server;
 }
 
-function renderApp() {
+function renderApp(path = "/settings") {
   render(
     <QueryClientProvider client={makeQueryClient()}>
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter initialEntries={[path]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -70,5 +71,30 @@ describe("session handling", () => {
       focusManager.setFocused(true); // refetch on focus -> the status query now gets a 401
     });
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+});
+
+describe("signed-out pages", () => {
+  it("links from sign-in to registration and password reset", async () => {
+    mockServer().signedIn = false;
+    renderApp("/login");
+    fireEvent.click(await screen.findByRole("link", { name: "Create an account" }));
+    expect(await screen.findByRole("button", { name: "Create account" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Sign in" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Forgot password?" }));
+    expect(await screen.findByRole("button", { name: "Send reset link" })).toBeInTheDocument();
+  });
+
+  it("shows the new-password form for a reset link", async () => {
+    mockServer().signedIn = false;
+    renderApp("/reset-password?token=abc");
+    expect(await screen.findByRole("button", { name: "Set new password" })).toBeInTheDocument();
+  });
+
+  it("shows the account and Telegram cards in settings", async () => {
+    mockServer();
+    renderApp();
+    expect(await screen.findByText("admin@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect Telegram" })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import type {
   AlertWithContext,
   EventPage,
   Instrument,
+  Me,
   SystemStatus,
   Watchlist,
   WatchlistItem,
@@ -61,10 +62,20 @@ export interface HistoryFilters {
 }
 
 export const api = {
-  me: () => request<{ username: string }>("GET", "/auth/me"),
-  login: (username: string, password: string) =>
-    request<{ username: string }>("POST", "/auth/login", { username, password }),
+  me: () => request<Me>("GET", "/auth/me"),
+  login: (username: string, password: string) => request<Me>("POST", "/auth/login", { username, password }),
   logout: () => request<void>("POST", "/auth/logout"),
+  register: (username: string, email: string, password: string) =>
+    request<Me>("POST", "/auth/register", { username, email, password }),
+  forgotPassword: (email: string) => request<{ detail: string }>("POST", "/auth/forgot-password", { email }),
+  resetPassword: (token: string, password: string) => request<Me>("POST", "/auth/reset-password", { token, password }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<Me>("POST", "/auth/change-password", { current_password, new_password }),
+  changeEmail: (email: string, current_password: string) =>
+    request<Me>("PUT", "/account/email", { email, current_password }),
+  telegramLink: () => request<{ url: string; bot: string }>("POST", "/account/telegram/link"),
+  telegramVerify: () => request<Me>("POST", "/account/telegram/verify"),
+  telegramUnlink: () => request<Me>("DELETE", "/account/telegram"),
 
   watchlists: () => request<Watchlist[]>("GET", "/watchlists"),
   createWatchlist: (name: string, description?: string) =>

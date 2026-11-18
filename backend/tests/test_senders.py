@@ -4,7 +4,7 @@ import respx
 
 from app.notify.base import SendError
 from app.notify.formatter import sample_message
-from app.notify.telegram import TelegramSender
+from app.notify.telegram import TelegramSender, find_start_code
 from app.notify.whatsapp import WhatsAppSender
 
 TG_URL = "https://api.telegram.org/botTOKEN/sendMessage"
@@ -20,6 +20,29 @@ async def test_telegram_success_sends_html():
     sent = route.calls.last.request.read().decode()
     assert '"parse_mode":"HTML"' in sent.replace(" ", "")
     assert "Long-Term Stocks" in sent
+
+
+@respx.mock
+async def test_telegram_recipient_overrides_default_chat():
+    route = respx.post(TG_URL).mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+    )
+    await TelegramSender("TOKEN", "123").send_text("hi", to="777")
+    assert '"chat_id":"777"' in route.calls.last.request.read().decode().replace(" ", "")
+    with pytest.raises(SendError) as e:
+        await TelegramSender("TOKEN").send_text("hi")  # no default and no recipient
+    assert not e.value.retryable
+
+
+@respx.mock
+async def test_find_start_code_matches_only_that_code():
+    respx.get("https://api.telegram.org/botTOKEN/getUpdates").mock(return_value=httpx.Response(
+        200, json={"ok": True, "result": [
+            {"update_id": 1, "message": {"text": "/start other", "chat": {"id": 1}}},
+            {"update_id": 2, "message": {"text": "/start abc123", "chat": {"id": 42}}},
+        ]}))
+    assert await find_start_code("TOKEN", "abc123") == "42"
+    assert await find_start_code("TOKEN", "missing") is None
 
 
 @respx.mock
