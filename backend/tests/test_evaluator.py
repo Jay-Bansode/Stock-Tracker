@@ -111,3 +111,64 @@ def test_candles_from_before_the_alert_was_armed_are_ignored():
 def test_streaming_ticks_without_candles_behave_as_before():
     r = rule(target="1500")
     assert evaluate([r], D("1499.95"), NOW).triggers == []
+
+
+# --- daily check windows (IST) -------------------------------------------------------------
+from datetime import time as _t  # noqa: E402
+
+from app.config import IST  # noqa: E402
+from app.engine.evaluator import in_window  # noqa: E402
+from app.marketdata.base import Candle  # noqa: E402
+
+
+def ist(h, m, s=0, day=29):
+    return datetime(2026, 10, day, h, m, s, tzinfo=IST)
+
+
+def timed(frm, until, **kw):
+    r = rule(mode="REPEAT", **kw)
+    r.check_from, r.check_until = _t(*frm), _t(*until)
+    return r
+
+
+def test_only_at_covers_that_whole_minute_and_nothing_else():
+    r = timed((15, 15), (15, 15))
+    assert not in_window(r, ist(15, 14, 59))
+    assert in_window(r, ist(15, 15, 0)) and in_window(r, ist(15, 15, 59))
+    assert not in_window(r, ist(15, 16, 0))
+    assert in_window(r, ist(15, 15).astimezone(UTC))  # UTC input is converted to IST
+
+
+def test_timed_alert_fires_only_inside_its_window():
+    r = timed((15, 15), (15, 15))
+    assert evaluate([r], D("1510"), ist(15, 14)).triggers == []
+    assert evaluate([r], D("1510"), ist(15, 15, 30)).triggers == [r]
+    assert evaluate([r], D("1510"), ist(15, 16)).triggers == []
+
+
+def test_between_window_uses_both_ends():
+    r = timed((14, 30), (15, 30))
+    assert evaluate([r], D("1510"), ist(14, 29)).triggers == []
+    assert evaluate([r], D("1510"), ist(14, 30)).triggers == [r]
+    assert evaluate([r], D("1510"), ist(15, 30, 59)).triggers == [r]
+    assert evaluate([r], D("1510"), ist(15, 31)).triggers == []
+
+
+def test_late_check_still_sees_the_window_candle_but_not_earlier_spikes():
+    r = timed((15, 15), (15, 15))
+    spike_before = Candle(start=ist(15, 14), high=D("1520"), low=D("1490"))
+    in_minute = Candle(start=ist(15, 15), high=D("1505"), low=D("1490"))
+    # 15:16 check, price now below target: the 15:15 candle's high still counts...
+    late = evaluate([r], D("1495"), ist(15, 16, 10), [spike_before, in_minute])
+    assert late.triggers == [r] and late.hit_prices[r.id] == D("1505")
+    # ...but a 15:14 spike alone can't fire a 15:15 alert
+    assert evaluate([r], D("1495"), ist(15, 15, 5), [spike_before]).triggers == []
+
+
+def test_timed_alert_rearms_next_day_regardless_of_band_and_cooldown():
+    fired = ist(15, 15, 20)
+    r = timed((15, 15), (15, 15), status="TRIGGERED", last=fired, cooldown=86400)
+    # same day, even far past the band: stays fired
+    assert not rearm_ready(r, D("1000"), ist(15, 40))
+    # next day, price still above target: daily check re-arms anyway
+    assert rearm_ready(r, D("1510"), ist(9, 0, day=30))

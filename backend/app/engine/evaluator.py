@@ -2,9 +2,10 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
+from app.config import IST
 from app.db.models import AlertStatus, Condition, TriggerMode
 from app.marketdata.base import Candle
 
@@ -23,6 +24,22 @@ class AlertRule:
     # When the alert last became ACTIVE (create / re-arm / edit). Candles that started before
     # this can't fire it, so a just re-armed alert ignores the spike that fired it last time.
     armed_since: datetime | None = None
+    # Daily check window in IST, whole minutes (from == until means "only at" that minute).
+    # None = all market hours. Timed alerts fire at most once per day and re-arm the next day.
+    check_from: time | None = None
+    check_until: time | None = None
+
+    @property
+    def timed(self) -> bool:
+        return self.check_from is not None and self.check_until is not None
+
+
+def in_window(rule: AlertRule, dt: datetime) -> bool:
+    """Whether `dt` falls inside the rule's daily window; always true for untimed rules."""
+    if not rule.timed:
+        return True
+    minute = dt.astimezone(IST).time().replace(second=0, microsecond=0)
+    return rule.check_from <= minute <= rule.check_until
 
 
 @dataclass(slots=True)
@@ -40,15 +57,22 @@ def condition_met(condition: str, target: Decimal, price: Decimal) -> bool:
     raise ValueError(f"unknown condition {condition!r}")
 
 
-def hit_price(rule: AlertRule, price: Decimal, candles: Iterable[Candle] = ()) -> Decimal | None:
+def hit_price(rule: AlertRule, price: Decimal, candles: Iterable[Candle] = (),
+              now: datetime | None = None) -> Decimal | None:
     """The price that satisfied the rule: the last traded price if it does, otherwise the most
-    extreme eligible candle high (ABOVE) / low (BELOW), else None."""
-    if condition_met(rule.condition, rule.target, price):
+    extreme eligible candle high (ABOVE) / low (BELOW), else None.
+
+    For timed rules the last price only counts inside the window, and only candles that started
+    inside it count. So a late 15:16 check still sees the 15:15 candle of a 15:15 alert, while a
+    15:14 spike can't fire it."""
+    if (now is None or in_window(rule, now)) and condition_met(rule.condition, rule.target, price):
         return price
     above = rule.condition == Condition.ABOVE
     best: Decimal | None = None
     for c in candles:
         if rule.armed_since is not None and c.start < rule.armed_since:
+            continue
+        if not in_window(rule, c.start):
             continue
         extreme = c.high if above else c.low
         if condition_met(rule.condition, rule.target, extreme):
@@ -58,9 +82,15 @@ def hit_price(rule: AlertRule, price: Decimal, candles: Iterable[Candle] = ()) -
 
 def rearm_ready(rule: AlertRule, price: Decimal, now: datetime) -> bool:
     """REPEAT alerts re-arm only after price retreats beyond the hysteresis band AND the cooldown
-    has passed, so a price hovering at the target can't spam notifications."""
+    has passed, so a price hovering at the target can't spam notifications.
+
+    Timed alerts are daily checks instead: they re-arm on the next IST day, wherever the price is.
+    """
     if rule.trigger_mode != TriggerMode.REPEAT or rule.status != AlertStatus.TRIGGERED:
         return False
+    if rule.timed:
+        return (rule.last_triggered_at is None
+                or now.astimezone(IST).date() > rule.last_triggered_at.astimezone(IST).date())
     if rule.last_triggered_at and now - rule.last_triggered_at < timedelta(seconds=rule.cooldown_sec):
         return False
     band = rule.target * rule.rearm_pct / Decimal(100)
@@ -76,7 +106,7 @@ def evaluate(rules: list[AlertRule], price: Decimal, now: datetime,
     decision = Decision()
     for rule in rules:
         if rule.status == AlertStatus.ACTIVE:
-            hit = hit_price(rule, price, candles)
+            hit = hit_price(rule, price, candles, now)
             if hit is not None:
                 decision.triggers.append(rule)
                 decision.hit_prices[rule.id] = hit

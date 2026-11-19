@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -12,10 +13,11 @@ from app.api.schemas import (
     AlertSaved,
     AlertWithContext,
     InstrumentOut,
+    check_window,
 )
-from app.db.models import Alert, AlertStatus, Watchlist, WatchlistItem
+from app.db.models import Alert, AlertStatus, TriggerMode, Watchlist, WatchlistItem
 from app.db.session import CHANNEL_ALERTS_CHANGED, notify
-from app.engine.evaluator import condition_met
+from app.engine.evaluator import AlertRule, condition_met, in_window
 
 router = APIRouter(tags=["alerts"])
 
@@ -24,10 +26,16 @@ async def _saved(alert: Alert, instrument_key: str, store) -> AlertSaved:
     out = AlertSaved.model_validate(alert)
     price = await store.get_ltp(instrument_key)
     out.current_price = price
+    window = AlertRule(id=alert.id, instrument_key=instrument_key, condition=alert.condition,
+                       target=alert.target_price, trigger_mode=alert.trigger_mode,
+                       rearm_pct=alert.rearm_pct, cooldown_sec=alert.cooldown_sec,
+                       status=alert.status, check_from=alert.check_from,
+                       check_until=alert.check_until)
     out.already_met = (
         price is not None
         and alert.status == AlertStatus.ACTIVE
         and condition_met(alert.condition, alert.target_price, price)
+        and in_window(window, datetime.now(UTC))  # a timed alert waits for its window
     )
     return out
 
@@ -102,10 +110,18 @@ async def update_alert(alert_id: int, body: AlertPatch, session: SessionDep, sto
     alert, key = await _get_alert(session, alert_id, user)
     changes = body.model_dump(exclude_unset=True)
     redefined = any(
-        k in changes and changes[k] != getattr(alert, k) for k in ("condition", "target_price")
+        k in changes and changes[k] != getattr(alert, k)
+        for k in ("condition", "target_price", "check_from", "check_until")
     )
+    try:
+        check_window(changes.get("check_from", alert.check_from),
+                     changes.get("check_until", alert.check_until))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     for field, value in changes.items():
         setattr(alert, field, value)
+    if alert.check_from is not None:
+        alert.trigger_mode = TriggerMode.REPEAT  # timed alerts are daily checks
     if redefined and alert.status != AlertStatus.DISABLED:
         alert.status = AlertStatus.ACTIVE  # a new condition is a new alert: arm it again
     await notify(session, CHANNEL_ALERTS_CHANGED)

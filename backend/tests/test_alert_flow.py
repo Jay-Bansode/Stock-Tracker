@@ -4,6 +4,9 @@ from decimal import Decimal as D
 
 from sqlalchemy import select, update
 
+from datetime import time
+
+from app.config import IST
 from app.db.models import Alert, AlertEvent, Notification, Watchlist, WatchlistItem
 from app.engine.index import AlertIndex
 from app.engine.processor import AlertProcessor
@@ -150,3 +153,26 @@ async def test_alerts_go_to_the_owners_own_chat(sm, example, owner):
     async with sm() as s:
         owners = dict((await s.execute(select(AlertEvent.id, AlertEvent.user_id))).all())
     assert owners == {admin_event: owner.id, linked_event: linked.id, unlinked_event: unlinked.id}
+
+
+async def test_only_at_alert_is_a_daily_check(sm, example):
+    alert_id = example["Banking Stocks"]  # HDFCBANK >= 1700
+    async with sm() as s:
+        await s.execute(update(Alert).where(Alert.id == alert_id).values(
+            trigger_mode="REPEAT", check_from=time(15, 15), check_until=time(15, 15)))
+        await s.commit()
+    index, proc = await _processor(sm)
+    day1 = datetime(2026, 10, 29, tzinfo=IST)
+    at = lambda d, h, m: d.replace(hour=h, minute=m)  # noqa: E731
+
+    await proc.process(Tick(HDFCBANK, D("1710")), now=at(day1, 15, 10))  # before the window
+    await proc.process(Tick(HDFCBANK, D("1710")), now=at(day1, 15, 15))  # fires
+    await proc.process(Tick(HDFCBANK, D("1712")), now=at(day1, 15, 15))  # same minute: no repeat
+    await proc.process(Tick(HDFCBANK, D("1715")), now=at(day1, 15, 20))  # after the window
+    assert [e.trigger_price for e in await _events(sm)] == [D("1710.00")]
+
+    day2 = day1 + timedelta(days=1)
+    await proc.process(Tick(HDFCBANK, D("1708")), now=at(day2, 9, 15))  # re-arms, too early to fire
+    assert len(await _events(sm)) == 1
+    await proc.process(Tick(HDFCBANK, D("1706")), now=at(day2, 15, 15))  # fires again
+    assert [e.trigger_price for e in await _events(sm)] == [D("1710.00"), D("1706.00")]

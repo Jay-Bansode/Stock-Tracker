@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
 import { conditionSymbol, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
-import { distancePct, exchangeOf, formatINR, formatIST, formatPct } from "../format";
+import { distancePct, exchangeOf, formatINR, formatIST, formatPct, formatWindow } from "../format";
 import { usePrices } from "../prices";
 import type { AlertStatus, AlertWithContext } from "../types";
 
@@ -92,7 +92,13 @@ export default function AlertsPage() {
                     </td>
                     <td className="td num text-right">
                       {conditionSymbol(a.condition)} {formatINR(a.target_price)}
-                      {a.trigger_mode === "REPEAT" && <span className="ml-1 text-xs text-slate-500" title="Re-arms automatically">↻</span>}
+                      {a.check_from ? (
+                        <span className="ml-1 block text-xs text-slate-500" title="Checked every trading day in this window (IST)">
+                          {formatWindow(a.check_from, a.check_until)}
+                        </span>
+                      ) : (
+                        a.trigger_mode === "REPEAT" && <span className="ml-1 text-xs text-slate-500" title="Re-arms automatically">↻</span>
+                      )}
                     </td>
                     <td className="td text-right">
                       <PriceCell value={p} />

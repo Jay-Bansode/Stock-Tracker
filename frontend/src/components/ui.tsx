@@ -27,22 +27,26 @@ export function AlertChip({
   condition,
   target,
   status,
+  when,
   onClick,
 }: {
   condition: Condition;
   target: number;
   status: AlertStatus;
+  /** Daily check window label, e.g. "at 3:15 PM"; empty for whole market hours. */
+  when?: string;
   onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title={`${condition === "ABOVE" ? "Price at or above" : "Price at or below"} ${formatINR(target)} — ${statusLabel[status]}`}
+      title={`${condition === "ABOVE" ? "Price at or above" : "Price at or below"} ${formatINR(target)}${when ? `, checked daily ${when}` : ""} — ${statusLabel[status]}`}
       className={`num inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset hover:brightness-95 ${statusStyles[status]} ${status === "DISABLED" ? "line-through" : ""}`}
     >
       {status === "TRIGGERED" && <span aria-hidden>●</span>}
       {conditionSymbol(condition)} {formatINR(target)}
+      {when && <span className="font-normal opacity-75">· {when}</span>}
     </button>
   );
 }

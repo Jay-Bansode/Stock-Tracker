@@ -253,6 +253,36 @@ async def test_change_password_and_email(client):
     assert r.json()["email"] == "new@example.com"
 
 
+async def test_timed_alerts(client):
+    await _login(client)
+    wl = (await client.post("/api/watchlists", json={"name": "Timed"})).json()
+    item = (await client.post(f"/api/watchlists/{wl['id']}/items",
+                              json={"instrument_key": RELIANCE})).json()
+    url = f"/api/watchlist-items/{item['id']}/alerts"
+    r = await client.post(url, json={"condition": "ABOVE", "target_price": 1500,
+                                     "trigger_mode": "ONCE",
+                                     "check_from": "15:15:30", "check_until": "15:15"})
+    assert r.status_code == 201
+    body = r.json()
+    assert (body["check_from"], body["check_until"]) == ("15:15:00", "15:15:00")
+    assert body["trigger_mode"] == "REPEAT"  # timed alerts are daily checks
+
+    one_end = await client.post(url, json={"condition": "ABOVE", "target_price": 1,
+                                           "check_from": "15:15"})
+    backwards = await client.post(url, json={"condition": "ABOVE", "target_price": 1,
+                                             "check_from": "15:30", "check_until": "15:00"})
+    assert one_end.status_code == backwards.status_code == 422
+    bad_patch = await client.patch(f"/api/alerts/{body['id']}", json={"check_until": "15:00"})
+    assert bad_patch.status_code == 422
+
+    between = await client.patch(f"/api/alerts/{body['id']}",
+                                 json={"check_from": "14:30", "check_until": "15:30"})
+    assert (between.json()["check_from"], between.json()["check_until"]) == ("14:30:00", "15:30:00")
+    cleared = await client.patch(f"/api/alerts/{body['id']}",
+                                 json={"check_from": None, "check_until": None})
+    assert cleared.json()["check_from"] is None and cleared.json()["check_until"] is None
+
+
 async def test_dev_ticks_resolves_symbols(client, redis):
     await _login(client)
     pubsub = redis.pubsub()

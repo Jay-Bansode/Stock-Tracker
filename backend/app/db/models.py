@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from enum import StrEnum
 
@@ -12,6 +12,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
 )
@@ -163,6 +164,10 @@ class Alert(Base):
         Numeric(5, 2), default=Decimal("0.5"), server_default="0.5"
     )
     cooldown_sec: Mapped[int] = mapped_column(Integer, default=900, server_default="900")
+    # Optional daily check window (IST, whole minutes). Both null = all market hours;
+    # from == until = "only at" that minute. Timed alerts fire at most once per trading day.
+    check_from: Mapped[time | None] = mapped_column(Time)
+    check_until: Mapped[time | None] = mapped_column(Time)
     status: Mapped[str] = mapped_column(String(12), default=AlertStatus.ACTIVE, index=True)
     last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_trigger_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
