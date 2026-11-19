@@ -7,6 +7,18 @@ export function formatINR(value: number | null | undefined): string {
   return Number.isInteger(value) ? inr.format(value) : inr2.format(value);
 }
 
+/** "15:15:00" -> "3:15 PM". */
+export function formatClock(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/** An alert's daily check window: "" (whole market hours), "at 3:15 PM" or "2:30 PM–3:30 PM". */
+export function formatWindow(from: string | null, until: string | null): string {
+  if (!from || !until) return "";
+  return from.slice(0, 5) === until.slice(0, 5) ? `at ${formatClock(from)}` : `${formatClock(from)}–${formatClock(until)}`;
+}
+
 /** Live prices always show paise so ticks line up visually. */
 export function formatLTP(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";

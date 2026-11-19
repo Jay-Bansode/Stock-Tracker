@@ -1,8 +1,16 @@
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, PlainSerializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from app.db.models import AlertStatus, Condition, TriggerMode
 
@@ -69,7 +77,26 @@ class InstrumentOut(ORM):
     instrument_type: str
 
 
-class AlertIn(BaseModel):
+def check_window(check_from: time | None, check_until: time | None) -> None:
+    """A daily check window needs both ends (equal = "only at" that minute), in order."""
+    if (check_from is None) != (check_until is None):
+        raise ValueError("Set both check_from and check_until, or neither")
+    if check_from is not None and check_from > check_until:
+        raise ValueError("check_from must not be after check_until")
+
+
+class _WindowFields(BaseModel):
+    # IST wall-clock times, whole minutes.
+    check_from: time | None = None
+    check_until: time | None = None
+
+    @field_validator("check_from", "check_until")
+    @classmethod
+    def _whole_minute(cls, value: time | None) -> time | None:
+        return value.replace(second=0, microsecond=0, tzinfo=None) if value else value
+
+
+class AlertIn(_WindowFields):
     condition: Condition
     target_price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
     trigger_mode: TriggerMode = TriggerMode.ONCE
@@ -77,8 +104,15 @@ class AlertIn(BaseModel):
     cooldown_sec: int = Field(default=900, ge=0, le=86400)
     note: str | None = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def _window(self) -> "AlertIn":
+        check_window(self.check_from, self.check_until)
+        if self.check_from is not None:
+            self.trigger_mode = TriggerMode.REPEAT  # timed alerts are daily checks
+        return self
 
-class AlertPatch(BaseModel):
+
+class AlertPatch(_WindowFields):
     condition: Condition | None = None
     target_price: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     trigger_mode: TriggerMode | None = None
@@ -95,6 +129,8 @@ class AlertOut(ORM):
     trigger_mode: TriggerMode
     rearm_pct: Money
     cooldown_sec: int
+    check_from: time | None
+    check_until: time | None
     status: AlertStatus
     last_triggered_at: datetime | None
     last_trigger_price: Money | None

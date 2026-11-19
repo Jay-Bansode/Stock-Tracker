@@ -47,6 +47,8 @@ class AlertIndex:
                         status=alert.status,
                         last_triggered_at=alert.last_triggered_at,
                         armed_since=alert.updated_at,
+                        check_from=alert.check_from,
+                        check_until=alert.check_until,
                     )
                 )
             keys = set((await session.scalars(select(WatchlistItem.instrument_key).distinct())).all())

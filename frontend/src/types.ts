@@ -19,6 +19,9 @@ export interface Alert {
   trigger_mode: TriggerMode;
   rearm_pct: number;
   cooldown_sec: number;
+  /** Daily check window, IST "HH:MM:SS"; both null = whole market hours, equal = only at. */
+  check_from: string | null;
+  check_until: string | null;
   status: AlertStatus;
   last_triggered_at: string | null;
   last_trigger_price: number | null;
@@ -45,6 +48,9 @@ export interface AlertInput {
   rearm_pct: number;
   cooldown_sec: number;
   note: string | null;
+  /** "HH:MM" IST, or null for whole market hours. */
+  check_from: string | null;
+  check_until: string | null;
 }
 
 export interface Watchlist {

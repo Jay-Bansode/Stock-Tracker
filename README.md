@@ -192,9 +192,16 @@ fee for utility templates in India. Check current rates in WhatsApp Manager. Ope
 | At or above / at or below | Fires when the last traded price is `≥` / `≤` the target. Touching the target counts. |
 | Once (default) | After firing, the alert shows **Target hit** and stays quiet until you click **Re-arm**. |
 | Re-arm automatically | After firing, re-arms once the price moves back past the target by the *re-arm band* (default 0.5%) **and** the *cooldown* (default 15 min) has passed. This prevents spam when a price hovers at the target. |
+| When to check: whole market hours (default) | The alert is checked all day, as described above. |
+| When to check: only at a time / between two times | A **daily check** (IST): the alert can only fire inside that window, e.g. *only at 3:15 PM* (any check during 15:15) or *between 2:30 PM and 3:30 PM*. You get at most one message per trading day, and it is checked again the next day. The re-arm band and cooldown don't apply. |
+
+In free-hosting mode, an *only at* time depends on the scheduler's call in that minute. If that
+call is late, the next one still notices a touch through that minute's 1-minute high/low, but a
+spike from before the window never counts.
 
 If the price already meets the condition when you save an alert, the form warns you that it will
-fire on the next tick. Changing an alert's condition or target re-arms it. Deleting an alert or a
+fire on the next tick (or during its check time, for a timed alert). Changing an alert's
+condition, target or check time re-arms it. Deleting an alert or a
 watchlist keeps its history, because history rows store names and prices as they were.
 
 ## Running it 24/7

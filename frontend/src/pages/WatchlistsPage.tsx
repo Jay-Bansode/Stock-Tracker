@@ -5,7 +5,7 @@ import { api } from "../api";
 import { AlertForm } from "../components/AlertForm";
 import { InstrumentSearch } from "../components/InstrumentSearch";
 import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
-import { dayChangePct, exchangeOf, formatIST, formatINR } from "../format";
+import { dayChangePct, exchangeOf, formatIST, formatINR, formatWindow } from "../format";
 import { usePrices } from "../prices";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
 
@@ -244,7 +244,7 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
         <td className="td">
           <div className="flex flex-wrap items-center gap-1.5">
             {item.alerts.map((a) => (
-              <AlertChip key={a.id} condition={a.condition} target={a.target_price} status={a.status} onClick={() => setEditing(a.id)} />
+              <AlertChip key={a.id} condition={a.condition} target={a.target_price} status={a.status} when={formatWindow(a.check_from, a.check_until)} onClick={() => setEditing(a.id)} />
             ))}
             <button className="btn btn-sm" onClick={() => setEditing("new")}>
               + Alert
