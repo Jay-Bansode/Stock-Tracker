@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
-import { NavLink } from "react-router";
+import { NavLink, useNavigate } from "react-router";
 import { api } from "../api";
 import { inMarketHoursIST, timeAgo } from "../format";
 import { priceStore } from "../prices";
@@ -62,10 +62,15 @@ function FeedIndicator() {
 
 export default function Layout({ username, children }: { username: string; children: ReactNode }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const logout = async () => {
     try {
       await api.logout();
     } finally {
+      // A deliberate sign-out starts fresh at /login. (An expired session keeps its URL, so
+      // signing in again returns to the same page.) The state tells the still-signed-in routes
+      // not to bounce /login back to /watchlists while the session is being cleared.
+      navigate("/login", { replace: true, state: { signingOut: true } });
       await resetSession(qc);
     }
   };
