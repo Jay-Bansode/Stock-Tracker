@@ -1,6 +1,6 @@
 import { focusManager, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { makeQueryClient } from "./queryClient";
@@ -14,6 +14,8 @@ const status = {
   channels: { TELEGRAM: false, WHATSAPP: false },
   alerts: { active: 0, triggered: 0, fired_today: 0 },
 };
+
+const me = { id: 1, username: "admin", email: "admin@example.com", is_admin: true, telegram_linked: false };
 
 /** Fake backend: the session lives in `server.signedIn`, like the real httpOnly cookie. */
 function mockServer() {
@@ -30,9 +32,12 @@ function mockServer() {
         server.signedIn = false;
         return json(204, null);
       }
+      if (url === "/api/auth/login") {
+        server.signedIn = true;
+        return json(200, me);
+      }
       if (!server.signedIn) return json(401, { detail: "Not signed in" });
-      if (url === "/api/auth/me")
-        return json(200, { id: 1, username: "admin", email: "admin@example.com", is_admin: true, telegram_linked: false });
+      if (url === "/api/auth/me") return json(200, me);
       if (url === "/api/system/status") return json(200, status);
       throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`);
     }),
@@ -40,11 +45,16 @@ function mockServer() {
   return server;
 }
 
+function CurrentPath() {
+  return <output data-testid="path">{useLocation().pathname}</output>;
+}
+
 function renderApp(path = "/settings") {
   render(
     <QueryClientProvider client={makeQueryClient()}>
       <MemoryRouter initialEntries={[path]}>
         <App />
+        <CurrentPath />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -59,6 +69,15 @@ describe("session handling", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByText("Not signed in")).not.toBeInTheDocument();
+    expect(screen.getByTestId("path")).toHaveTextContent("/login");
+
+    // signing straight back in opens the app
+    fireEvent.change(screen.getByLabelText("Username or email"), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    // the redirect from /login runs in an effect right after that render
+    await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent("/watchlists"));
   });
 
   it("returns to the login page when the session expires mid-use", async () => {
@@ -71,6 +90,7 @@ describe("session handling", () => {
       focusManager.setFocused(true); // refetch on focus -> the status query now gets a 401
     });
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.getByTestId("path")).toHaveTextContent("/settings"); // back here after sign-in
   });
 });
 

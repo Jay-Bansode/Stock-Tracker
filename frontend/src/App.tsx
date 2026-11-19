@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, Route, Routes } from "react-router";
+import { useEffect } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { api } from "./api";
 import { ME_KEY } from "./queryClient";
 import Layout from "./components/Layout";
@@ -12,12 +13,25 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import SettingsPage from "./pages/SettingsPage";
 import WatchlistsPage from "./pages/WatchlistsPage";
 
+const Loading = () => <div className="grid h-screen place-items-center text-sm text-slate-500">Loading…</div>;
+
+/** /login while signed in: go to the app, unless this is the sign-out on its way. */
+function SignedInLogin() {
+  const state = useLocation().state as { signingOut?: boolean } | null;
+  return state?.signingOut ? <Loading /> : <Navigate to="/watchlists" replace />;
+}
+
 export default function App() {
   const me = useQuery({ queryKey: ME_KEY, queryFn: api.me, retry: false, staleTime: Infinity });
+  const location = useLocation();
+  const navigate = useNavigate();
+  const signingOut = (location.state as { signingOut?: boolean } | null)?.signingOut;
+  useEffect(() => {
+    // Sign-out finished: drop the marker so signing in again from /login opens the app.
+    if (me.isError && signingOut) navigate(location.pathname, { replace: true });
+  }, [me.isError, signingOut, location.pathname, navigate]);
 
-  if (me.isPending) {
-    return <div className="grid h-screen place-items-center text-sm text-slate-500">Loading…</div>;
-  }
+  if (me.isPending) return <Loading />;
   if (me.isError) {
     // Any other path shows the login form in place, so signing in lands back on that page.
     return (
@@ -40,6 +54,7 @@ export default function App() {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/login" element={<SignedInLogin />} />
         <Route path="*" element={<Navigate to="/watchlists" replace />} />
       </Routes>
     </Layout>
