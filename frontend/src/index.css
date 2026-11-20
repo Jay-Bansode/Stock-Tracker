@@ -11,6 +11,9 @@
 
 body {
   @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  /* Safety net only: layouts are built not to overflow, but one stray wide element shouldn't
+     make the whole page scroll sideways on a phone. */
+  overflow-x: clip;
 }
 
 .num {
@@ -46,6 +49,13 @@ body {
 
   .btn-sm {
     @apply px-2 py-1 text-xs;
+  }
+
+  /* Touch screens: small buttons still get a finger-sized target. */
+  @media (pointer: coarse) {
+    .btn-sm {
+      @apply min-h-9 px-2.5;
+    }
   }
 
   .th {

@@ -67,10 +67,10 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
 
   return (
     <form onSubmit={submit} className="space-y-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-500">Alert when price is</span>
-          <select className="input w-40" value={condition} onChange={(e) => setCondition(e.target.value as Condition)}>
+          <select className="input sm:w-40" value={condition} onChange={(e) => setCondition(e.target.value as Condition)}>
             <option value="ABOVE">At or above (≥)</option>
             <option value="BELOW">At or below (≤)</option>
           </select>
@@ -78,7 +78,7 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-500">Target price (₹)</span>
           <input
-            className="input num w-36"
+            className="input num sm:w-36"
             inputMode="decimal"
             autoFocus
             placeholder={ltp ? ltp.toFixed(2) : "1500"}
@@ -88,7 +88,7 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-500">When to check</span>
-          <select className="input w-48" value={when} onChange={(e) => changeWhen(e.target.value as When)}>
+          <select className="input sm:w-48" value={when} onChange={(e) => changeWhen(e.target.value as When)}>
             <option value="ALL">Whole market hours</option>
             <option value="AT">Only at a time</option>
             <option value="BETWEEN">Between two times</option>
@@ -97,19 +97,19 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
         {timed && (
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-500">{when === "AT" ? "At (IST)" : "From (IST)"}</span>
-            <input className="input num w-32" type="time" step={60} min="09:15" max="15:30" required value={from} onChange={(e) => setFrom(e.target.value)} />
+            <input className="input num sm:w-32" type="time" step={60} min="09:15" max="15:30" required value={from} onChange={(e) => setFrom(e.target.value)} />
           </label>
         )}
         {when === "BETWEEN" && (
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-500">Until (IST)</span>
-            <input className="input num w-32" type="time" step={60} min="09:15" max="15:30" required value={until} onChange={(e) => setUntil(e.target.value)} />
+            <input className="input num sm:w-32" type="time" step={60} min="09:15" max="15:30" required value={until} onChange={(e) => setUntil(e.target.value)} />
           </label>
         )}
         {!timed && (
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-500">Repeat</span>
-            <select className="input w-44" value={mode} onChange={(e) => setMode(e.target.value as TriggerMode)}>
+            <select className="input sm:w-44" value={mode} onChange={(e) => setMode(e.target.value as TriggerMode)}>
               <option value="ONCE">Once (re-arm manually)</option>
               <option value="REPEAT">Re-arm automatically</option>
             </select>
@@ -121,15 +121,15 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
               <span className="mb-1 block text-xs font-medium text-slate-500" title="Price must move back this far past the target before the alert can fire again">
                 Re-arm band (%)
               </span>
-              <input className="input num w-24" inputMode="decimal" value={rearmPct} onChange={(e) => setRearmPct(e.target.value)} />
+              <input className="input num sm:w-24" inputMode="decimal" value={rearmPct} onChange={(e) => setRearmPct(e.target.value)} />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-500">Cooldown (min)</span>
-              <input className="input num w-24" inputMode="numeric" value={cooldownMin} onChange={(e) => setCooldownMin(e.target.value)} />
+              <input className="input num sm:w-24" inputMode="numeric" value={cooldownMin} onChange={(e) => setCooldownMin(e.target.value)} />
             </label>
           </>
         )}
-        <label className="block min-w-48 flex-1">
+        <label className="col-span-2 block sm:min-w-48 sm:flex-1">
           <span className="mb-1 block text-xs font-medium text-slate-500">Note (optional)</span>
           <input className="input" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="e.g. breakout above resistance" />
         </label>
@@ -158,7 +158,7 @@ export function AlertForm({ initial, ltp, busy, error, onSubmit, onCancel, onDel
 
       {error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : String(error)}</p> : null}
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button className="btn btn-primary" disabled={!valid || busy}>
           {initial ? "Save alert" : "Add alert"}
         </button>

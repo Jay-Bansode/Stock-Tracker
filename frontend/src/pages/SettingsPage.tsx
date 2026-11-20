@@ -8,9 +8,9 @@ import type { Me } from "../types";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2 text-sm">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-right font-medium">{children}</span>
+    <div className="flex flex-col gap-0.5 py-2 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="min-w-0 font-medium break-words sm:text-right">{children}</span>
     </div>
   );
 }
@@ -145,7 +145,7 @@ function ChannelRow({ channel, label, configured, hint }: { channel: string; lab
   const test = useMutation({ mutationFn: () => api.testNotification(channel) });
   return (
     <div className="py-2 text-sm">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span>
           <Dot ok={configured} />
           <span className="font-medium">{label}</span>{" "}
@@ -324,9 +324,9 @@ function DevTicks() {
         <h2 className="font-semibold">Simulator: set a price</h2>
         <p className="text-xs text-slate-500">Pushes an exact tick through the alert engine, the same path live Upstox ticks take.</p>
       </div>
-      <div className="flex gap-2">
-        <input className="input w-36" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="Symbol" />
-        <input className="input num w-28" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Price" />
+      <div className="flex flex-wrap gap-2">
+        <input className="input min-w-0 flex-1 sm:w-36 sm:flex-none" aria-label="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="Symbol" />
+        <input className="input num w-28 min-w-0" aria-label="Price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Price" />
         <button className="btn btn-primary whitespace-nowrap" disabled={inject.isPending || !symbol || !Number(price)}>
           Push tick
         </button>

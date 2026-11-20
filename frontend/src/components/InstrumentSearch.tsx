@@ -80,7 +80,7 @@ export function InstrumentSearch({
         aria-controls="instrument-results"
       />
       {open && debounced && (
-        <ul id="instrument-results" role="listbox" className="card absolute z-30 mt-1 max-h-80 w-full overflow-auto py-1">
+        <ul id="instrument-results" role="listbox" className="card absolute z-30 mt-1 max-h-[60vh] w-full overflow-auto py-1 sm:max-h-80">
           {isFetching && !data.length && <li className="px-3 py-2 text-sm text-slate-500">Searching…</li>}
           {!isFetching && !data.length && <li className="px-3 py-2 text-sm text-slate-500">No matches</li>}
           {data.map((i, idx) => {

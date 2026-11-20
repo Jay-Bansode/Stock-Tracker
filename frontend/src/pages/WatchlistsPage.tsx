@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "../api";
 import { AlertForm } from "../components/AlertForm";
@@ -8,6 +8,10 @@ import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } 
 import { dayChangePct, exchangeOf, formatIST, formatINR, formatWindow } from "../format";
 import { usePrices } from "../prices";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
+
+// Desktop columns: Stock | LTP | Day | Alerts | Remove. Shared by the header and every row.
+const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
+const ROW_GRID = `grid ${ROW_GRID_MD}`;
 
 function useInvalidate() {
   const qc = useQueryClient();
@@ -32,7 +36,7 @@ export default function WatchlistsPage() {
   }, [lists.data, selected, navigate]);
 
   return (
-    <div className="grid gap-6 md:grid-cols-[260px_minmax(0,1fr)]">
+    <div className="grid gap-4 md:grid-cols-[240px_minmax(0,1fr)] md:gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
       <Sidebar lists={lists.data ?? []} selectedId={selectedId} />
       {lists.isPending ? (
         <p className="text-sm text-slate-500">Loading…</p>
@@ -63,35 +67,40 @@ function Sidebar({ lists, selectedId }: { lists: Watchlist[]; selectedId?: numbe
   };
 
   return (
-    <aside className="space-y-3">
-      <h2 className="px-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Watchlists</h2>
-      <ul className="space-y-1">
-        {lists.map((w) => (
-          <li key={w.id}>
-            <button
-              onClick={() => navigate(`/watchlists/${w.id}`)}
-              className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm ${
-                w.id === selectedId
-                  ? "bg-white font-medium shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
-                  : "hover:bg-slate-100 dark:hover:bg-slate-900"
-              }`}
-            >
-              <span className="truncate">{w.name}</span>
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
-                {w.triggered_alerts > 0 && (
-                  <span className="rounded bg-amber-100 px-1.5 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300" title="Alerts with target hit">
-                    {w.triggered_alerts} hit
-                  </span>
-                )}
-                <span title="Stocks">{w.item_count}</span>
-              </span>
-            </button>
-          </li>
-        ))}
+    <aside className="min-w-0 space-y-3">
+      <h2 className="hidden px-1 text-xs font-semibold tracking-wide text-slate-500 uppercase md:block">Watchlists</h2>
+      {/* Phones: a swipeable row of pills. md+: a vertical list. */}
+      <ul className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0">
+        {lists.map((w) => {
+          const active = w.id === selectedId;
+          return (
+            <li key={w.id} className="shrink-0">
+              <button
+                onClick={() => navigate(`/watchlists/${w.id}`)}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-left text-sm whitespace-nowrap md:w-full md:justify-between md:rounded-lg md:border-0 md:py-2 md:whitespace-normal ${
+                  active
+                    ? "border-teal-600 bg-teal-50 font-medium text-teal-900 md:bg-white md:text-inherit md:shadow-sm md:ring-1 md:ring-slate-200 dark:bg-teal-950 dark:text-teal-100 md:dark:bg-slate-900 md:dark:ring-slate-800"
+                    : "border-slate-200 bg-white hover:bg-slate-100 md:bg-transparent dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-900 md:dark:bg-transparent"
+                }`}
+              >
+                <span className="max-w-48 truncate md:max-w-none">{w.name}</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
+                  {w.triggered_alerts > 0 && (
+                    <span className="rounded bg-amber-100 px-1.5 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300" title="Alerts with target hit">
+                      {w.triggered_alerts} hit
+                    </span>
+                  )}
+                  <span title="Stocks">{w.item_count}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <form onSubmit={submit} className="flex gap-2">
-        <input className="input" placeholder="New watchlist" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
-        <button className="btn btn-primary" disabled={!name.trim() || create.isPending}>
+        <input className="input min-w-0" placeholder="New watchlist" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        <button className="btn btn-primary shrink-0" disabled={!name.trim() || create.isPending}>
           Add
         </button>
       </form>
@@ -131,23 +140,23 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
 
   return (
     <section className="min-w-0 space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {renaming ? (
           <form
-            className="flex gap-2"
+            className="flex w-full gap-2 sm:w-auto"
             onSubmit={(e) => {
               e.preventDefault();
               if (newName.trim()) rename.mutate();
             }}
           >
-            <input className="input w-64" autoFocus value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
+            <input className="input min-w-0 sm:w-64" autoFocus value={newName} maxLength={100} onChange={(e) => setNewName(e.target.value)} />
             <button className="btn btn-primary">Save</button>
             <button type="button" className="btn" onClick={() => setRenaming(false)}>
               Cancel
             </button>
           </form>
         ) : (
-          <h1 className="text-xl font-semibold">{watchlist.name}</h1>
+          <h1 className="min-w-0 text-xl font-semibold break-words">{watchlist.name}</h1>
         )}
         <span className="text-sm text-slate-500">
           {watchlist.item_count} {watchlist.item_count === 1 ? "stock" : "stocks"} · {watchlist.active_alerts} watching · {watchlist.triggered_alerts} hit
@@ -175,7 +184,7 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
         <ErrorText error={addItem.error} />
       </div>
 
-      <div className="card overflow-x-auto">
+      <div className="card">
         {items.isPending ? (
           <p className="p-4 text-sm text-slate-500">Loading…</p>
         ) : !items.data?.length ? (
@@ -183,22 +192,20 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
             <EmptyState title="No stocks in this watchlist">Search above to add one, then set a target price.</EmptyState>
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th className="th">Stock</th>
-                <th className="th text-right">LTP</th>
-                <th className="th text-right">Day</th>
-                <th className="th">Alerts</th>
-                <th className="th sr-only">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          <>
+            <div className={`${ROW_GRID} hidden border-b border-slate-200 md:grid dark:border-slate-800`}>
+              <span className="th px-0">Stock</span>
+              <span className="th px-0 text-right">LTP</span>
+              <span className="th px-0 text-right">Day</span>
+              <span className="th px-0">Alerts</span>
+              <span className="sr-only">Actions</span>
+            </div>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
               {items.data.map((item) => (
                 <ItemRow key={item.id} item={item} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
               ))}
-            </tbody>
-          </table>
+            </ul>
+          </>
         )}
       </div>
     </section>
@@ -227,22 +234,27 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
 
   const i = item.instrument;
   return (
-    <Fragment>
-      <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
-        <td className="td">
+    <li className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+      {/* Phones: a two-column card (stock | price, then alerts + remove). md+: one grid row whose
+          cells line up with the header; the md:contents wrappers dissolve so their children
+          become the LTP / Day / Alerts / Remove columns. */}
+      <div className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 px-3 py-3 ${ROW_GRID_MD} md:items-center md:py-0`}>
+        <div className="min-w-0 md:py-2.5">
           <div className="font-medium">{i.trading_symbol}</div>
-          <div className="max-w-64 truncate text-xs text-slate-500">
+          <div className="truncate text-xs text-slate-500">
             {i.name} · {exchangeOf(i.instrument_key)}
           </div>
-        </td>
-        <td className="td text-right">
-          <PriceCell value={price?.p} />
-        </td>
-        <td className="td text-right text-sm">
-          <ChangeText pct={dayChangePct(price?.p, price?.c)} />
-        </td>
-        <td className="td">
-          <div className="flex flex-wrap items-center gap-1.5">
+        </div>
+        <div className="flex flex-col items-end text-sm md:contents">
+          <div className="md:text-right">
+            <PriceCell value={price?.p} />
+          </div>
+          <div className="text-xs md:text-right md:text-sm">
+            <ChangeText pct={dayChangePct(price?.p, price?.c)} />
+          </div>
+        </div>
+        <div className="col-span-2 flex items-start justify-between gap-2 md:contents">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:py-2.5">
             {item.alerts.map((a) => (
               <AlertChip key={a.id} condition={a.condition} target={a.target_price} status={a.status} when={formatWindow(a.check_from, a.check_until)} onClick={() => setEditing(a.id)} />
             ))}
@@ -250,50 +262,48 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
               + Alert
             </button>
           </div>
-        </td>
-        <td className="td text-right">
-          <button
-            className="btn btn-sm btn-danger"
-            title="Remove from watchlist"
-            onClick={() => {
-              if (!item.alerts.length || confirm(`Remove ${i.trading_symbol} and its ${item.alerts.length} alert(s) from this watchlist?`))
-                removeItem.mutate();
-            }}
-          >
-            Remove
-          </button>
-        </td>
-      </tr>
+          <div className="shrink-0 md:text-right">
+            <button
+              className="btn btn-sm btn-danger"
+              title="Remove from watchlist"
+              onClick={() => {
+                if (!item.alerts.length || confirm(`Remove ${i.trading_symbol} and its ${item.alerts.length} alert(s) from this watchlist?`))
+                  removeItem.mutate();
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
       {editing !== null && (
-        <tr>
-          <td colSpan={5} className="px-3 pb-3">
-            {editingAlert && (
-              <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                <StatusBadge status={editingAlert.status} />
-                {editingAlert.last_triggered_at && (
-                  <span>
-                    Last hit {formatIST(editingAlert.last_triggered_at)} at {formatINR(editingAlert.last_trigger_price)} · fired{" "}
-                    {editingAlert.trigger_count}×
-                  </span>
-                )}
-                <button className="btn btn-sm" disabled={toggle.isPending} onClick={() => toggle.mutate(editingAlert)}>
-                  {editingAlert.status === "ACTIVE" ? "Disable" : "Re-arm"}
-                </button>
-              </div>
-            )}
-            <AlertForm
-              key={editing}
-              initial={editingAlert}
-              ltp={price?.p}
-              busy={save.isPending || del.isPending}
-              error={save.error ?? del.error ?? toggle.error}
-              onSubmit={(input) => save.mutate(input)}
-              onCancel={() => setEditing(null)}
-              onDelete={editingAlert ? () => del.mutate(editingAlert.id) : undefined}
-            />
-          </td>
-        </tr>
+        <div className="px-3 pb-3">
+          {editingAlert && (
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
+              <StatusBadge status={editingAlert.status} />
+              {editingAlert.last_triggered_at && (
+                <span>
+                  Last hit {formatIST(editingAlert.last_triggered_at)} at {formatINR(editingAlert.last_trigger_price)} · fired{" "}
+                  {editingAlert.trigger_count}×
+                </span>
+              )}
+              <button className="btn btn-sm" disabled={toggle.isPending} onClick={() => toggle.mutate(editingAlert)}>
+                {editingAlert.status === "ACTIVE" ? "Disable" : "Re-arm"}
+              </button>
+            </div>
+          )}
+          <AlertForm
+            key={editing}
+            initial={editingAlert}
+            ltp={price?.p}
+            busy={save.isPending || del.isPending}
+            error={save.error ?? del.error ?? toggle.error}
+            onSubmit={(input) => save.mutate(input)}
+            onCancel={() => setEditing(null)}
+            onDelete={editingAlert ? () => del.mutate(editingAlert.id) : undefined}
+          />
+        </div>
       )}
-    </Fragment>
+    </li>
   );
 }
