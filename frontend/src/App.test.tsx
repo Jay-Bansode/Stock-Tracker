@@ -69,7 +69,8 @@ describe("session handling", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByText("Not signed in")).not.toBeInTheDocument();
-    expect(screen.getByTestId("path")).toHaveTextContent("/login");
+    // a background refresh may show the form a moment before the redirect lands
+    await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent("/login"));
 
     // signing straight back in opens the app
     fireEvent.change(screen.getByLabelText("Username or email"), { target: { value: "admin" } });

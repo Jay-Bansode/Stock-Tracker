@@ -33,15 +33,15 @@ export default function AlertsPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <h1 className="mr-auto text-xl font-semibold">All alerts</h1>
-        <select className="input w-44" value={status} onChange={(e) => setStatus(e.target.value as AlertStatus | "")}>
+      <div className="grid grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap">
+        <h1 className="col-span-2 text-xl font-semibold sm:mr-auto">All alerts</h1>
+        <select className="input sm:w-44" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as AlertStatus | "")}>
           <option value="">All statuses</option>
           <option value="ACTIVE">Watching</option>
           <option value="TRIGGERED">Target hit</option>
           <option value="DISABLED">Disabled</option>
         </select>
-        <select className="input w-56" value={watchlistId} onChange={(e) => setWatchlistId(e.target.value ? Number(e.target.value) : "")}>
+        <select className="input sm:w-56" aria-label="Watchlist" value={watchlistId} onChange={(e) => setWatchlistId(e.target.value ? Number(e.target.value) : "")}>
           <option value="">All watchlists</option>
           {lists.data?.map((w) => (
             <option key={w.id} value={w.id}>
@@ -52,7 +52,7 @@ export default function AlertsPage() {
       </div>
       <ErrorText error={act.error} />
 
-      <div className="card overflow-x-auto">
+      <div className="card overflow-hidden">
         {alerts.isPending ? (
           <p className="p-4 text-sm text-slate-500">Loading…</p>
         ) : !alerts.data?.length ? (
@@ -62,7 +62,50 @@ export default function AlertsPage() {
             </EmptyState>
           </div>
         ) : (
-          <table className="w-full">
+          <>
+          {/* Phones: one card per alert, every action visible. */}
+          <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
+            {alerts.data.map((a) => {
+              const p = prices.get(a.instrument.instrument_key)?.p;
+              return (
+                <li key={a.id} className="space-y-2 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div>
+                        <span className="font-medium">{a.instrument.trading_symbol}</span>
+                        <span className="ml-1 text-xs text-slate-500">{exchangeOf(a.instrument.instrument_key)}</span>
+                      </div>
+                      <Link className="block truncate text-xs text-slate-500 hover:underline" to={`/watchlists/${a.watchlist_id}`}>
+                        {a.watchlist_name}
+                      </Link>
+                    </div>
+                    <StatusBadge status={a.status} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-500">Target</div>
+                      <TargetText a={a} />
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">LTP</div>
+                      <PriceCell value={p} />
+                    </div>
+                    <div className="num text-right text-slate-600 dark:text-slate-300">
+                      <div className="text-xs text-slate-500">To target</div>
+                      {a.status === "ACTIVE" ? formatPct(distancePct(p, a.target_price)) : "—"}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">
+                      {a.last_triggered_at ? `Last hit ${formatIST(a.last_triggered_at)} at ${formatINR(a.last_trigger_price)}` : "Not hit yet"}
+                    </span>
+                    <Actions a={a} onAct={(action) => act.mutate({ a, action })} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <table className="hidden w-full md:table">
             <thead className="border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="th">Watchlist</th>
@@ -90,15 +133,8 @@ export default function AlertsPage() {
                       <span className="font-medium">{a.instrument.trading_symbol}</span>
                       <span className="ml-1 text-xs text-slate-500">{exchangeOf(a.instrument.instrument_key)}</span>
                     </td>
-                    <td className="td num text-right">
-                      {conditionSymbol(a.condition)} {formatINR(a.target_price)}
-                      {a.check_from ? (
-                        <span className="ml-1 block text-xs text-slate-500" title="Checked every trading day in this window (IST)">
-                          {formatWindow(a.check_from, a.check_until)}
-                        </span>
-                      ) : (
-                        a.trigger_mode === "REPEAT" && <span className="ml-1 text-xs text-slate-500" title="Re-arms automatically">↻</span>
-                      )}
+                    <td className="td text-right">
+                      <TargetText a={a} />
                     </td>
                     <td className="td text-right">
                       <PriceCell value={p} />
@@ -121,29 +157,50 @@ export default function AlertsPage() {
                       )}
                     </td>
                     <td className="td whitespace-nowrap text-right">
-                      {a.status === "ACTIVE" ? (
-                        <button className="btn btn-sm" onClick={() => act.mutate({ a, action: "disable" })}>
-                          Disable
-                        </button>
-                      ) : (
-                        <button className="btn btn-sm" onClick={() => act.mutate({ a, action: "rearm" })}>
-                          Re-arm
-                        </button>
-                      )}{" "}
-                      <button
-                        className="btn btn-sm btn-danger"
-                        onClick={() => confirm("Delete this alert? Its history is kept.") && act.mutate({ a, action: "delete" })}
-                      >
-                        Delete
-                      </button>
+                      <Actions a={a} onAct={(action) => act.mutate({ a, action })} />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </>
         )}
       </div>
     </section>
+  );
+}
+
+function TargetText({ a }: { a: AlertWithContext }) {
+  return (
+    <span className="num">
+      {conditionSymbol(a.condition)} {formatINR(a.target_price)}
+      {a.check_from ? (
+        <span className="block text-xs text-slate-500" title="Checked every trading day in this window (IST)">
+          {formatWindow(a.check_from, a.check_until)}
+        </span>
+      ) : (
+        a.trigger_mode === "REPEAT" && <span className="ml-1 text-xs text-slate-500" title="Re-arms automatically">↻</span>
+      )}
+    </span>
+  );
+}
+
+function Actions({ a, onAct }: { a: AlertWithContext; onAct: (action: "rearm" | "disable" | "delete") => void }) {
+  return (
+    <span className="inline-flex gap-2">
+      {a.status === "ACTIVE" ? (
+        <button className="btn btn-sm" onClick={() => onAct("disable")}>
+          Disable
+        </button>
+      ) : (
+        <button className="btn btn-sm" onClick={() => onAct("rearm")}>
+          Re-arm
+        </button>
+      )}
+      <button className="btn btn-sm btn-danger" onClick={() => confirm("Delete this alert? Its history is kept.") && onAct("delete")}>
+        Delete
+      </button>
+    </span>
   );
 }

@@ -52,10 +52,15 @@ function FeedIndicator() {
       label = "Feed reconnecting";
     }
   }
+  // Phones show just the dot (label in the tooltip / for screen readers); wider screens show the text.
   return (
-    <NavLink to="/settings" className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300" title="Market data status">
-      <span className={`size-2 rounded-full ${tone}`} />
-      {label}
+    <NavLink
+      to="/settings"
+      className="flex shrink-0 items-center gap-2 rounded-full border border-slate-200 p-2 text-xs whitespace-nowrap text-slate-600 sm:px-3 sm:py-1 dark:border-slate-700 dark:text-slate-300"
+      title={`Market data: ${label}`}
+    >
+      <span className={`size-2.5 rounded-full sm:size-2 ${tone}`} aria-hidden />
+      <span className="sr-only sm:not-sr-only">{label}</span>
     </NavLink>
   );
 }
@@ -78,15 +83,15 @@ export default function Layout({ username, children }: { username: string; child
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
-          <div className="flex items-center gap-2 font-semibold">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:gap-6">
+          <div className="flex shrink-0 items-center gap-2 font-semibold">
             <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
               <rect width="32" height="32" rx="7" className="fill-teal-700" />
               <path d="M7 21l6-6 4 4 8-9" stroke="white" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             Tracker
           </div>
-          <nav className="flex gap-1 overflow-x-auto">
+          <nav aria-label="Main" className="hidden gap-1 sm:flex">
             {nav.map((n) => (
               <NavLink
                 key={n.to}
@@ -103,16 +108,40 @@ export default function Layout({ username, children }: { username: string; child
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
             <FeedIndicator />
-            <span className="hidden text-sm text-slate-600 sm:inline dark:text-slate-300">{username}</span>
-            <button className="btn btn-sm" onClick={logout} title={`Signed in as ${username}`}>
+            <span className="hidden max-w-40 truncate text-sm text-slate-600 md:inline dark:text-slate-300">{username}</span>
+            <button className="btn btn-sm shrink-0 whitespace-nowrap" onClick={logout} title={`Signed in as ${username}`}>
               Sign out
             </button>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      {/* Phones: room at the bottom for the tab bar (plus the iPhone home indicator). */}
+      <main className="mx-auto max-w-7xl px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:py-6">{children}</main>
+      <nav
+        aria-label="Main (mobile)"
+        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden dark:border-slate-800 dark:bg-slate-950/95"
+      >
+        {nav.map((n) => (
+          <NavLink
+            key={n.to}
+            to={n.to}
+            className={({ isActive }) =>
+              `flex h-14 flex-col items-center justify-center gap-0.5 text-xs font-medium ${
+                isActive ? "text-teal-700 dark:text-teal-300" : "text-slate-500 dark:text-slate-400"
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <span className={`h-1 w-8 rounded-full ${isActive ? "bg-teal-600 dark:bg-teal-400" : "bg-transparent"}`} aria-hidden />
+                {n.label}
+              </>
+            )}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }
