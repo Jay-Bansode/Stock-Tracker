@@ -308,6 +308,35 @@ async def test_buying_date(client):
     assert (await client.patch(wrong_list, json={"bought_on": None})).status_code == 404
 
 
+async def test_history_sorting(client, sm):
+    await _login(client)
+    wl = (await client.post("/api/watchlists", json={"name": "Sorted"})).json()
+    found = (await client.get("/api/instruments/search", params={"q": "hdfc"})).json()
+    hdfc = next(i["instrument_key"] for i in found if i["trading_symbol"] == "HDFCBANK")
+    fired = []
+    for key, target, price in ((RELIANCE, 1500, D("1502")), (hdfc, 1600, D("1650"))):
+        item = (await client.post(f"/api/watchlists/{wl['id']}/items",
+                                  json={"instrument_key": key})).json()
+        alert = (await client.post(f"/api/watchlist-items/{item['id']}/alerts",
+                                   json={"condition": "ABOVE", "target_price": target})).json()
+        await trigger_alert(sm, alert["id"], price, None, ["TELEGRAM"])
+        fired.append(alert["id"])
+
+    symbols = lambda r: [e["trading_symbol"] for e in r.json()["items"]]  # noqa: E731
+    default = await client.get("/api/history")
+    assert symbols(default) == ["HDFCBANK", "RELIANCE"]  # newest first, as before
+    by_symbol = await client.get("/api/history", params={"sort": "symbol", "dir": "asc"})
+    assert symbols(by_symbol) == ["HDFCBANK", "RELIANCE"]
+    by_price = await client.get("/api/history", params={"sort": "price", "dir": "asc"})
+    assert symbols(by_price) == ["RELIANCE", "HDFCBANK"]  # 1502 before 1650
+    oldest = await client.get("/api/history", params={"sort": "time", "dir": "asc"})
+    assert symbols(oldest) == ["RELIANCE", "HDFCBANK"]
+    assert (await client.get("/api/history", params={"sort": "bogus"})).status_code == 422
+
+    csv = (await client.get("/api/history/export.csv", params={"sort": "price", "dir": "desc"})).text
+    assert csv.index("HDFCBANK") < csv.index("RELIANCE")
+
+
 async def test_dev_ticks_resolves_symbols(client, redis):
     await _login(client)
     pubsub = redis.pubsub()

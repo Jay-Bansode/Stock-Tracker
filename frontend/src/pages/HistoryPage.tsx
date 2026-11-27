@@ -1,17 +1,51 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type HistoryFilters } from "../api";
+import { SortHeader } from "../components/SortHeader";
+import { SortSelect } from "../components/SortSelect";
 import { conditionSymbol, DeliveryStatus, EmptyState, ErrorText } from "../components/ui";
 import { exchangeOf, formatINR, formatIST } from "../format";
+import { useSort, type SortColumns, type SortState } from "../sorting";
 
 const PAGE_SIZE = 50;
+
+// History is paged, so it's sorted on the server; these only declare the keys and first direction.
+type HistorySortKey = NonNullable<HistoryFilters["sort"]>;
+const COLUMNS: SortColumns<unknown, HistorySortKey> = {
+  time: { value: () => null, first: "desc" },
+  watchlist: { value: () => null },
+  symbol: { value: () => null },
+  target: { value: () => null, first: "desc" },
+  price: { value: () => null, first: "desc" },
+};
+const SORT_OPTIONS: { key: HistorySortKey; label: string; first?: "asc" | "desc" }[] = [
+  { key: "time", label: "Time", first: "desc" },
+  { key: "watchlist", label: "Watchlist" },
+  { key: "symbol", label: "Stock" },
+  { key: "target", label: "Target", first: "desc" },
+  { key: "price", label: "Price at hit", first: "desc" },
+];
 
 export default function HistoryPage() {
   const qc = useQueryClient();
   const [filters, setFilters] = useState<HistoryFilters>({});
   const [page, setPage] = useState(1);
   const lists = useQuery({ queryKey: ["watchlists"], queryFn: api.watchlists });
-  const query = { ...filters, page, page_size: PAGE_SIZE };
+  const historySort = useSort("history", COLUMNS);
+  // A new sort starts again from page 1.
+  const setSort = (next: SortState<HistorySortKey>) => {
+    historySort.set(next);
+    setPage(1);
+  };
+  const toggleSort = (key: HistorySortKey) => {
+    historySort.toggle(key);
+    setPage(1);
+  };
+  const sortParams = historySort.sort ? { sort: historySort.sort.key, dir: historySort.sort.dir } : {};
+  const query = { ...filters, ...sortParams, page, page_size: PAGE_SIZE };
+  const header = (label: string, key: HistorySortKey, align?: "right") => (
+    <SortHeader label={label} sortKey={key} sort={historySort.sort} onToggle={toggleSort} align={align} />
+  );
   const history = useQuery({
     queryKey: ["history", query],
     queryFn: () => api.history(query),
@@ -58,7 +92,7 @@ export default function HistoryPage() {
           To
           <input type="date" className="input sm:w-40" value={filters.date_to ?? ""} onChange={(e) => set({ date_to: e.target.value || undefined })} />
         </label>
-        <a className="btn col-span-2" href={api.historyCsvUrl(filters)}>
+        <a className="btn col-span-2" href={api.historyCsvUrl({ ...filters, ...sortParams })}>
           Export CSV
         </a>
       </div>
@@ -74,6 +108,7 @@ export default function HistoryPage() {
         ) : (
           <>
           {/* Phones: one card per event. */}
+          <SortSelect className="border-b border-slate-200 p-3 md:hidden dark:border-slate-800" options={SORT_OPTIONS} sort={historySort.sort} onChange={setSort} defaultLabel="Newest first" />
           <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
             {history.data.items.map((e) => {
               const byChannel = Object.fromEntries(e.notifications.map((n) => [n.channel, n]));
@@ -116,11 +151,11 @@ export default function HistoryPage() {
           <table className="hidden w-full md:table">
             <thead className="border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="th">Time</th>
-                <th className="th">Watchlist</th>
-                <th className="th">Stock</th>
-                <th className="th text-right">Target</th>
-                <th className="th text-right">Price at hit</th>
+                {header("Time", "time")}
+                {header("Watchlist", "watchlist")}
+                {header("Stock", "symbol")}
+                {header("Target", "target", "right")}
+                {header("Price at hit", "price", "right")}
                 <th className="th">Telegram</th>
                 <th className="th">WhatsApp</th>
               </tr>

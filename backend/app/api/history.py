@@ -1,7 +1,7 @@
 import csv
 import io
 from datetime import date, datetime, time, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -16,6 +16,25 @@ from app.db.session import CHANNEL_OUTBOX, notify
 from app.notify.formatter import format_ist
 
 router = APIRouter(tags=["history"])
+
+SortKey = Literal["time", "watchlist", "symbol", "target", "price"]
+SortDir = Literal["asc", "desc"]
+_SORT_COLUMNS = {
+    "time": AlertEvent.triggered_at,
+    "watchlist": func.lower(AlertEvent.watchlist_name),
+    "symbol": func.lower(AlertEvent.trading_symbol),
+    "target": AlertEvent.target_price,
+    "price": AlertEvent.trigger_price,
+}
+
+
+def _ordering(sort: SortKey, direction: SortDir):
+    """Order by the chosen column, with the event id as a stable tiebreaker (same direction), so
+    paging never shows a row twice or skips one."""
+    col = _SORT_COLUMNS[sort]
+    if direction == "asc":
+        return col.asc(), AlertEvent.id.asc()
+    return col.desc(), AlertEvent.id.desc()
 
 
 def _filtered(user, watchlist_id, symbol, date_from, date_to):
@@ -43,12 +62,14 @@ async def history(
     date_to: date | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    sort: SortKey = "time",
+    dir: SortDir = "desc",
 ):
     q = _filtered(user, watchlist_id, symbol, date_from, date_to)
     total = await session.scalar(select(func.count()).select_from(q.subquery()))
     rows = await session.scalars(
         q.options(selectinload(AlertEvent.notifications))
-        .order_by(AlertEvent.triggered_at.desc(), AlertEvent.id.desc())
+        .order_by(*_ordering(sort, dir))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -68,11 +89,13 @@ async def export_history(
     symbol: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    sort: SortKey = "time",
+    dir: SortDir = "desc",
 ):
     rows = await session.scalars(
         _filtered(user, watchlist_id, symbol, date_from, date_to)
         .options(selectinload(AlertEvent.notifications))
-        .order_by(AlertEvent.triggered_at.desc())
+        .order_by(*_ordering(sort, dir))
     )
     buf = io.StringIO()
     w = csv.writer(buf)

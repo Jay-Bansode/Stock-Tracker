@@ -65,7 +65,14 @@ function renderPage() {
 
 const rowOf = async (symbol: string) => (await screen.findByText(symbol)).closest("li")!;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear(); // sort choices are remembered per browser
+});
+
+/** Stock symbols in the order the rows are shown. */
+const shownSymbols = () =>
+  screen.getAllByTitle("Remove from watchlist").map((b) => b.closest("li")!.querySelector(".font-medium")!.textContent);
 
 describe("WatchlistsPage", () => {
   it("gives every stock its alert and remove actions in a single row", async () => {
@@ -140,5 +147,42 @@ describe("WatchlistsPage", () => {
     expect(template(header)).toBeDefined();
     expect(template(row)).toBe(template(header));
     expect(template(header)).not.toMatch(/auto/); // content-sized tracks differ per grid
+  });
+
+  it("sorts stocks by clicking a column heading, and remembers it", async () => {
+    renderPage();
+    await rowOf("RELIANCE");
+    expect(shownSymbols()).toEqual(["RELIANCE", "HDFCBANK"]); // order added
+
+    const stock = screen.getByRole("button", { name: "Stock" });
+    fireEvent.click(stock);
+    expect(shownSymbols()).toEqual(["HDFCBANK", "RELIANCE"]);
+    expect(stock.closest("[aria-sort]")).toHaveAttribute("aria-sort", "ascending");
+
+    fireEvent.click(stock);
+    expect(shownSymbols()).toEqual(["RELIANCE", "HDFCBANK"]);
+    expect(stock.closest("[aria-sort]")).toHaveAttribute("aria-sort", "descending");
+
+    fireEvent.click(stock); // third click: back to the order added
+    expect(stock.closest("[aria-sort]")).toHaveAttribute("aria-sort", "none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Alerts" })); // most alerts first
+    expect(shownSymbols()).toEqual(["RELIANCE", "HDFCBANK"]);
+    expect(JSON.parse(localStorage.getItem("tracker.sort.watchlist-items")!)).toEqual({ key: "alerts", dir: "desc" });
+  });
+
+  it("sorts the watchlists from the compact sidebar menu", async () => {
+    renderPage();
+    await rowOf("RELIANCE");
+    const listNames = () => screen.getAllByRole("button", { name: /Long-Term|Intraday/ }).map((b) => b.textContent?.replace(/\d+$/, ""));
+    expect(listNames()).toEqual(["Long-Term", "Intraday"]); // my order
+
+    const menu = screen.getByLabelText("Sort watchlists");
+    fireEvent.change(menu, { target: { value: "name:asc" } });
+    expect(listNames()).toEqual(["Intraday", "Long-Term"]);
+    expect(JSON.parse(localStorage.getItem("tracker.sort.watchlists")!)).toEqual({ key: "name", dir: "asc" });
+
+    fireEvent.change(menu, { target: { value: "" } });
+    expect(listNames()).toEqual(["Long-Term", "Intraday"]);
   });
 });

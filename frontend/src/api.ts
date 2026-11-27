@@ -59,6 +59,9 @@ export interface HistoryFilters {
   date_to?: string;
   page?: number;
   page_size?: number;
+  /** Server-side sort; omitted = newest first. */
+  sort?: "time" | "watchlist" | "symbol" | "target" | "price";
+  dir?: "asc" | "desc";
 }
 
 export const api = {

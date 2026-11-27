@@ -3,10 +3,26 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
 import { useConfirm } from "../components/ConfirmDialog";
+import { SortHeader } from "../components/SortHeader";
+import { SortSelect } from "../components/SortSelect";
 import { conditionSymbol, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
 import { distancePct, exchangeOf, formatINR, formatIST, formatPct, formatWindow } from "../format";
 import { usePrices } from "../prices";
+import { sortRows, useSort, type SortColumns } from "../sorting";
 import type { AlertStatus, AlertWithContext } from "../types";
+
+type AlertSortKey = "watchlist" | "symbol" | "target" | "ltp" | "to_target" | "status" | "last_hit";
+// Status sorts by what needs attention: target hit, then watching, then disabled.
+const STATUS_ORDER: Record<AlertStatus, number> = { TRIGGERED: 0, ACTIVE: 1, DISABLED: 2 };
+const SORT_OPTIONS: { key: AlertSortKey; label: string; first?: "asc" | "desc" }[] = [
+  { key: "watchlist", label: "Watchlist" },
+  { key: "symbol", label: "Stock" },
+  { key: "target", label: "Target", first: "desc" },
+  { key: "ltp", label: "LTP", first: "desc" },
+  { key: "to_target", label: "Closest to target" },
+  { key: "status", label: "Status" },
+  { key: "last_hit", label: "Last hit", first: "desc" },
+];
 
 export default function AlertsPage() {
   const qc = useQueryClient();
@@ -20,6 +36,26 @@ export default function AlertsPage() {
   });
   const keys = useMemo(() => (alerts.data ?? []).map((a) => a.instrument.instrument_key), [alerts.data]);
   const prices = usePrices(keys);
+  const columns = useMemo<SortColumns<AlertWithContext, AlertSortKey>>(
+    () => ({
+      watchlist: { value: (a) => a.watchlist_name },
+      symbol: { value: (a) => a.instrument.trading_symbol },
+      target: { value: (a) => a.target_price, first: "desc" },
+      ltp: { value: (a) => prices.get(a.instrument.instrument_key)?.p, first: "desc" },
+      // Closest to its target first; only watching alerts have a meaningful distance.
+      to_target: {
+        value: (a) => (a.status === "ACTIVE" ? Math.abs(distancePct(prices.get(a.instrument.instrument_key)?.p, a.target_price) ?? NaN) : null),
+      },
+      status: { value: (a) => STATUS_ORDER[a.status] },
+      last_hit: { value: (a) => (a.last_triggered_at ? Date.parse(a.last_triggered_at) : null), first: "desc" },
+    }),
+    [prices],
+  );
+  const alertSort = useSort("alerts", columns);
+  const rows = useMemo(() => sortRows(alerts.data ?? [], alertSort.sort, columns), [alerts.data, alertSort.sort, columns]);
+  const header = (label: string, key: AlertSortKey, align?: "right", title?: string) => (
+    <SortHeader label={label} sortKey={key} sort={alertSort.sort} onToggle={alertSort.toggle} align={align} title={title} />
+  );
 
   const refresh = () =>
     Promise.all(["alerts", "items", "watchlists", "status"].map((k) => qc.invalidateQueries({ queryKey: [k] })));
@@ -65,8 +101,9 @@ export default function AlertsPage() {
         ) : (
           <>
           {/* Phones: one card per alert, every action visible. */}
+          <SortSelect className="border-b border-slate-200 p-3 md:hidden dark:border-slate-800" options={SORT_OPTIONS} sort={alertSort.sort} onChange={alertSort.set} />
           <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
-            {alerts.data.map((a) => {
+            {rows.map((a) => {
               const p = prices.get(a.instrument.instrument_key)?.p;
               return (
                 <li key={a.id} className="space-y-2 p-3">
@@ -109,18 +146,18 @@ export default function AlertsPage() {
           <table className="hidden w-full md:table">
             <thead className="border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="th">Watchlist</th>
-                <th className="th">Stock</th>
-                <th className="th text-right">Target</th>
-                <th className="th text-right">LTP</th>
-                <th className="th text-right" title="Move needed from current price to reach the target">To target</th>
-                <th className="th">Status</th>
-                <th className="th">Last hit</th>
+                {header("Watchlist", "watchlist")}
+                {header("Stock", "symbol")}
+                {header("Target", "target", "right")}
+                {header("LTP", "ltp", "right")}
+                {header("To target", "to_target", "right", "Move needed from current price to reach the target")}
+                {header("Status", "status")}
+                {header("Last hit", "last_hit")}
                 <th className="th sr-only">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {alerts.data.map((a) => {
+              {rows.map((a) => {
                 const p = prices.get(a.instrument.instrument_key)?.p;
                 const dist = distancePct(p, a.target_price);
                 return (
