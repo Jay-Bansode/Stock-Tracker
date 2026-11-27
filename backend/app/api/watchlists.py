@@ -4,7 +4,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.schemas import ItemIn, ItemOut, OrderIn, WatchlistIn, WatchlistOut, WatchlistPatch
+from app.api.schemas import (
+    ItemIn,
+    ItemOut,
+    ItemPatch,
+    OrderIn,
+    WatchlistIn,
+    WatchlistOut,
+    WatchlistPatch,
+)
 from app.db.models import Alert, AlertStatus, Instrument, Watchlist, WatchlistItem
 from app.db.session import CHANNEL_ALERTS_CHANGED, notify
 
@@ -138,6 +146,27 @@ async def add_item(watchlist_id: int, body: ItemIn, session: SessionDep, user: C
         .where(WatchlistItem.id == item.id)
         .options(selectinload(WatchlistItem.alerts))
     )
+    return ItemOut.model_validate(item)
+
+
+@router.patch("/{watchlist_id}/items/{item_id}", response_model=ItemOut)
+async def update_item(watchlist_id: int, item_id: int, body: ItemPatch, session: SessionDep,
+                      user: CurrentUser):
+    """Set or clear the buying date. Alerts are untouched, so the engine isn't notified."""
+    await _get_watchlist(session, watchlist_id, user)
+    item = await session.get(WatchlistItem, item_id)
+    if item is None or item.watchlist_id != watchlist_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Item not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(item, field, value)
+    await session.commit()
+    item = await session.scalar(
+        select(WatchlistItem)
+        .where(WatchlistItem.id == item_id)
+        .options(selectinload(WatchlistItem.alerts))
+        .execution_options(populate_existing=True)
+    )
+    item.alerts.sort(key=lambda a: a.id)
     return ItemOut.model_validate(item)
 
 

@@ -69,6 +69,8 @@ export interface WatchlistItem {
   watchlist_id: number;
   instrument: Instrument;
   notes: string | null;
+  /** Buying date "YYYY-MM-DD", entered by the user; drives the "Held" column. */
+  bought_on: string | null;
   added_at: string;
   alerts: Alert[];
 }

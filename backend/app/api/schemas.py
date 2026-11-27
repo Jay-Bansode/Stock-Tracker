@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Annotated
 
@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.config import IST
 from app.db.models import AlertStatus, Condition, TriggerMode
 
 # Decimals go over the wire as JSON numbers; they are only displayed client-side.
@@ -177,11 +178,26 @@ class ItemIn(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class ItemPatch(BaseModel):
+    bought_on: date | None = None  # null clears it
+
+    @field_validator("bought_on")
+    @classmethod
+    def _sensible_date(cls, value: date | None) -> date | None:
+        if value is not None:
+            if value > datetime.now(IST).date():
+                raise ValueError("The buying date can't be in the future")
+            if value < date(1990, 1, 1):
+                raise ValueError("The buying date looks too early; check the year")
+        return value
+
+
 class ItemOut(ORM):
     id: int
     watchlist_id: int
     instrument: InstrumentOut
     notes: str | None
+    bought_on: date | None
     added_at: datetime
     alerts: list[AlertOut]
 

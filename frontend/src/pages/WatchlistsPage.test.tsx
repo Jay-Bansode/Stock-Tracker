@@ -17,24 +17,32 @@ const instrument = (symbol: string, key: string) => ({
 
 const items = [
   {
-    id: 10, watchlist_id: 1, instrument: instrument("RELIANCE", "NSE_EQ|A"), notes: null, added_at: "2026-11-01T00:00:00Z",
+    id: 10, watchlist_id: 1, instrument: instrument("RELIANCE", "NSE_EQ|A"), notes: null, bought_on: "2024-08-12", added_at: "2026-11-01T00:00:00Z",
     alerts: [{
       id: 100, watchlist_item_id: 10, condition: "ABOVE", target_price: 1500, trigger_mode: "REPEAT", rearm_pct: 0.5, cooldown_sec: 900,
       check_from: "15:15:00", check_until: "15:15:00", status: "ACTIVE", last_triggered_at: null, last_trigger_price: null,
       trigger_count: 0, note: null, created_at: "2026-11-01T00:00:00Z",
     }],
   },
-  { id: 11, watchlist_id: 1, instrument: instrument("HDFCBANK", "NSE_EQ|B"), notes: null, added_at: "2026-11-01T00:00:00Z", alerts: [] },
+  { id: 11, watchlist_id: 1, instrument: instrument("HDFCBANK", "NSE_EQ|B"), notes: null, bought_on: null, added_at: "2026-11-01T00:00:00Z", alerts: [] },
 ];
+
+let patched: { url: string; body: unknown }[] = [];
 
 function renderPage() {
   const deleted: string[] = [];
+  patched = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "DELETE") {
         deleted.push(url);
         return new Response(null, { status: 204 });
+      }
+      if (init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        patched.push({ url, body });
+        return new Response(JSON.stringify({ ...items[1], ...body }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       const body = url === "/api/watchlists" ? watchlists : url === "/api/watchlists/1/items" ? items : null;
       if (body === null) throw new Error(`unexpected ${url}`);
@@ -107,5 +115,20 @@ describe("WatchlistsPage", () => {
     expect(deleted).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(deleted).toEqual(["/api/watchlists/1/items/11"]));
+  });
+
+  it("shows how long each stock has been held and lets you set a buying date", async () => {
+    renderPage();
+    const reliance = await rowOf("RELIANCE");
+    expect(within(reliance).getAllByTitle(/Bought 12 Aug 2024/).length).toBeGreaterThan(0);
+
+    const hdfc = await rowOf("HDFCBANK");
+    fireEvent.click(within(hdfc).getAllByRole("button", { name: "+ Buy date" })[0]);
+    const input = within(hdfc).getByLabelText("Buying date of HDFCBANK");
+    fireEvent.change(input, { target: { value: "2025-01-15" } });
+    fireEvent.click(within(hdfc).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(patched).toEqual([{ url: "/api/watchlists/1/items/11", body: { bought_on: "2025-01-15" } }]),
+    );
   });
 });

@@ -188,6 +188,8 @@ async def test_users_only_see_their_own_data(client, sm):
         assert (await bob.delete(f"/api/alerts/{alert['id']}")).status_code == 404
         assert (await bob.post(f"/api/notifications/{note_id}/retry")).status_code == 404
         assert (await bob.post("/api/dev/ticks", json={"RELIANCE": 1})).status_code == 403
+        assert (await bob.patch(f"{wl_url}/items/{item['id']}",
+                                json={"bought_on": "2024-01-01"})).status_code == 404
         # the same watchlist name is fine for a different user
         assert (await bob.post("/api/watchlists", json={"name": "Mine"})).status_code == 201
         status = (await bob.get("/api/system/status")).json()
@@ -281,6 +283,29 @@ async def test_timed_alerts(client):
     cleared = await client.patch(f"/api/alerts/{body['id']}",
                                  json={"check_from": None, "check_until": None})
     assert cleared.json()["check_from"] is None and cleared.json()["check_until"] is None
+
+
+async def test_buying_date(client):
+    await _login(client)
+    wl = (await client.post("/api/watchlists", json={"name": "Held"})).json()
+    item = (await client.post(f"/api/watchlists/{wl['id']}/items",
+                              json={"instrument_key": RELIANCE})).json()
+    assert item["bought_on"] is None
+    url = f"/api/watchlists/{wl['id']}/items/{item['id']}"
+
+    r = await client.patch(url, json={"bought_on": "2024-08-12"})
+    assert r.status_code == 200 and r.json()["bought_on"] == "2024-08-12"
+    listed = (await client.get(f"/api/watchlists/{wl['id']}/items")).json()
+    assert listed[0]["bought_on"] == "2024-08-12"
+
+    future = (datetime.now(UTC) + timedelta(days=3)).date().isoformat()
+    assert (await client.patch(url, json={"bought_on": future})).status_code == 422
+    assert (await client.patch(url, json={"bought_on": "1985-01-01"})).status_code == 422
+
+    cleared = await client.patch(url, json={"bought_on": None})
+    assert cleared.json()["bought_on"] is None
+    wrong_list = f"/api/watchlists/{wl['id'] + 999}/items/{item['id']}"
+    assert (await client.patch(wrong_list, json={"bought_on": None})).status_code == 404
 
 
 async def test_dev_ticks_resolves_symbols(client, redis):

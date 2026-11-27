@@ -6,12 +6,12 @@ import { AlertForm } from "../components/AlertForm";
 import { useConfirm } from "../components/ConfirmDialog";
 import { InstrumentSearch } from "../components/InstrumentSearch";
 import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
-import { dayChangePct, exchangeOf, formatIST, formatINR, formatWindow } from "../format";
+import { dayChangePct, exchangeOf, formatDate, formatIST, formatINR, formatWindow, heldFor, todayIST } from "../format";
 import { usePrices } from "../prices";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
 
-// Desktop columns: Stock | LTP | Day | Alerts | Remove. Shared by the header and every row.
-const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
+// Desktop columns: Stock | LTP | Day | Held | Alerts | Remove. Shared by the header and every row.
+const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_5.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
 const ROW_GRID = `grid ${ROW_GRID_MD}`;
 
 function useInvalidate() {
@@ -205,6 +205,9 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
               <span className="th px-0">Stock</span>
               <span className="th px-0 text-right">LTP</span>
               <span className="th px-0 text-right">Day</span>
+              <span className="th px-0" title="How long you've held it, from the buying date">
+                Held
+              </span>
               <span className="th px-0">Alerts</span>
               <span className="sr-only">Actions</span>
             </div>
@@ -232,7 +235,8 @@ function ItemRow({
   onChanged: () => Promise<unknown>;
 }) {
   const confirm = useConfirm();
-  const [editing, setEditing] = useState<"new" | number | null>(null);
+  // What's open under the row: a new alert, an existing alert (its id), or the buying date.
+  const [editing, setEditing] = useState<"new" | number | "date" | null>(null);
   const editingAlert: Alert | undefined = typeof editing === "number" ? item.alerts.find((a) => a.id === editing) : undefined;
 
   const done = async () => {
@@ -263,6 +267,9 @@ function ItemRow({
           <div className="truncate text-xs text-slate-500">
             {i.name} · {exchangeOf(i.instrument_key)}
           </div>
+          <div className="mt-0.5 text-xs md:hidden">
+            <HeldButton boughtOn={item.bought_on} onClick={() => setEditing("date")} withLabel />
+          </div>
         </div>
         <div className="flex flex-col items-end text-sm md:contents">
           <div className="md:text-right">
@@ -271,6 +278,9 @@ function ItemRow({
           <div className="text-xs md:text-right md:text-sm">
             <ChangeText pct={dayChangePct(price?.p, price?.c)} />
           </div>
+        </div>
+        <div className="hidden text-sm md:block">
+          <HeldButton boughtOn={item.bought_on} onClick={() => setEditing("date")} />
         </div>
         <div className="col-span-2 flex items-start justify-between gap-2 md:contents">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:py-2.5">
@@ -303,7 +313,12 @@ function ItemRow({
           </div>
         </div>
       </div>
-      {editing !== null && (
+      {editing === "date" && (
+        <div className="px-3 pb-3">
+          <BuyDateEditor item={item} onDone={() => setEditing(null)} onChanged={onChanged} />
+        </div>
+      )}
+      {editing !== null && editing !== "date" && (
         <div className="px-3 pb-3">
           {editingAlert && (
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
@@ -339,5 +354,68 @@ function ItemRow({
         </div>
       )}
     </li>
+  );
+}
+
+/** "2y 3m" (tooltip: the buying date), or "+ Buy date" when none is set. */
+function HeldButton({ boughtOn, onClick, withLabel = false }: { boughtOn: string | null; onClick: () => void; withLabel?: boolean }) {
+  const held = heldFor(boughtOn);
+  if (!boughtOn) {
+    return (
+      <button className="text-xs font-medium text-teal-700 hover:underline dark:text-teal-400" onClick={onClick}>
+        + Buy date
+      </button>
+    );
+  }
+  return (
+    <button className="num text-left hover:underline" title={`Bought ${formatDate(boughtOn)} · click to change`} onClick={onClick}>
+      {withLabel && <span className="text-slate-500">Held </span>}
+      <span className="font-medium text-slate-700 dark:text-slate-200">{held || "—"}</span>
+    </button>
+  );
+}
+
+function BuyDateEditor({ item, onDone, onChanged }: { item: WatchlistItem; onDone: () => void; onChanged: () => Promise<unknown> }) {
+  const today = todayIST();
+  const [value, setValue] = useState(item.bought_on ?? "");
+  const save = useMutation({
+    mutationFn: (bought_on: string | null) => api.updateItem(item.watchlist_id, item.id, { bought_on }),
+    onSuccess: async () => {
+      onDone();
+      await onChanged();
+    },
+  });
+  const valid = !!value && value <= today;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (valid) save.mutate(value);
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      onKeyDown={(e) => e.key === "Escape" && onDone()}
+      className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50"
+    >
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-slate-500">Buying date of {item.instrument.trading_symbol}</span>
+        <input className="input num sm:w-44" type="date" autoFocus max={today} min="1990-01-01" required value={value} onChange={(e) => setValue(e.target.value)} />
+      </label>
+      {valid && <span className="pb-2 text-xs text-slate-500">Held {heldFor(value, today)}</span>}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn btn-primary" disabled={!valid || save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="btn" onClick={onDone}>
+          Cancel
+        </button>
+        {item.bought_on && (
+          <button type="button" className="btn btn-danger" disabled={save.isPending} onClick={() => save.mutate(null)}>
+            Clear
+          </button>
+        )}
+      </div>
+      {save.error && <ErrorText error={save.error} />}
+    </form>
   );
 }
