@@ -5,9 +5,12 @@ import { api } from "../api";
 import { AlertForm } from "../components/AlertForm";
 import { useConfirm } from "../components/ConfirmDialog";
 import { InstrumentSearch } from "../components/InstrumentSearch";
+import { SortHeader } from "../components/SortHeader";
+import { SortMenu, SortSelect, type SortChoice } from "../components/SortSelect";
 import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
 import { dayChangePct, exchangeOf, formatDate, formatIST, formatINR, formatWindow, heldFor, todayIST } from "../format";
 import { usePrices } from "../prices";
+import { sortRows, useSort, type SortColumns } from "../sorting";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
 
 // Desktop columns: Stock | LTP | Day | Held | Alerts | Remove. Shared by the header and every row.
@@ -15,6 +18,32 @@ import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../type
 // ("auto") track would be 0 px in the header but button-wide in rows, shifting the columns.
 const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_5.5rem_minmax(0,2fr)_5rem] md:gap-x-3 md:px-3";
 const ROW_GRID = `grid ${ROW_GRID_MD}`;
+
+// Sidebar: a view-only sort; the saved "my order" (sort_order) is untouched.
+type ListSortKey = "name" | "stocks" | "hits";
+const LIST_COLUMNS: SortColumns<Watchlist, ListSortKey> = {
+  name: { value: (w) => w.name },
+  stocks: { value: (w) => w.item_count, first: "desc" },
+  hits: { value: (w) => w.triggered_alerts, first: "desc" },
+};
+const LIST_SORT_CHOICES: SortChoice<ListSortKey>[] = [
+  { label: "My order", sort: null },
+  { label: "Name A–Z", sort: { key: "name", dir: "asc" } },
+  { label: "Name Z–A", sort: { key: "name", dir: "desc" } },
+  { label: "Most stocks", sort: { key: "stocks", dir: "desc" } },
+  { label: "Fewest stocks", sort: { key: "stocks", dir: "asc" } },
+  { label: "Most hits", sort: { key: "hits", dir: "desc" } },
+  { label: "Fewest hits", sort: { key: "hits", dir: "asc" } },
+];
+
+type ItemSortKey = "symbol" | "ltp" | "day" | "held" | "alerts";
+const ITEM_SORT_OPTIONS: { key: ItemSortKey; label: string; first?: "asc" | "desc" }[] = [
+  { key: "symbol", label: "Stock" },
+  { key: "ltp", label: "LTP", first: "desc" },
+  { key: "day", label: "Day %", first: "desc" },
+  { key: "held", label: "Held", first: "desc" },
+  { key: "alerts", label: "Alerts", first: "desc" },
+];
 
 function useInvalidate() {
   const qc = useQueryClient();
@@ -54,6 +83,7 @@ export default function WatchlistsPage() {
 
 function Sidebar({ lists, selectedId }: { lists: Watchlist[]; selectedId?: number }) {
   const navigate = useNavigate();
+  const listSort = useSort("watchlists", LIST_COLUMNS);
   const invalidate = useInvalidate();
   const [name, setName] = useState("");
   const create = useMutation({
@@ -71,10 +101,13 @@ function Sidebar({ lists, selectedId }: { lists: Watchlist[]; selectedId?: numbe
 
   return (
     <aside className="min-w-0 space-y-3">
-      <h2 className="hidden px-1 text-xs font-semibold tracking-wide text-slate-500 uppercase md:block">Watchlists</h2>
+      <div className="flex items-center justify-end gap-2 md:justify-between">
+        <h2 className="hidden px-1 text-xs font-semibold tracking-wide text-slate-500 uppercase md:block">Watchlists</h2>
+        <SortMenu ariaLabel="Sort watchlists" choices={LIST_SORT_CHOICES} sort={listSort.sort} onChange={listSort.set} />
+      </div>
       {/* Phones: a swipeable row of pills. md+: a vertical list. */}
       <ul className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0">
-        {lists.map((w) => {
+        {sortRows(lists, listSort.sort, LIST_COLUMNS).map((w) => {
           const active = w.id === selectedId;
           return (
             <li key={w.id} className="shrink-0">
@@ -120,6 +153,25 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
   const keys = useMemo(() => (items.data ?? []).map((i) => i.instrument.instrument_key), [items.data]);
   const prices = usePrices(keys);
   const existing = useMemo(() => new Set(keys), [keys]);
+  const itemColumns = useMemo<SortColumns<WatchlistItem, ItemSortKey>>(
+    () => ({
+      symbol: { value: (it) => it.instrument.trading_symbol },
+      ltp: { value: (it) => prices.get(it.instrument.instrument_key)?.p, first: "desc" },
+      day: {
+        value: (it) => {
+          const p = prices.get(it.instrument.instrument_key);
+          return dayChangePct(p?.p, p?.c);
+        },
+        first: "desc",
+      },
+      // Earlier buying date = held longer; "desc" lists the longest-held first.
+      held: { value: (it) => (it.bought_on ? -Date.parse(it.bought_on) : null), first: "desc" },
+      alerts: { value: (it) => it.alerts.length, first: "desc" },
+    }),
+    [prices],
+  );
+  const itemSort = useSort("watchlist-items", itemColumns);
+  const sortedItems = useMemo(() => sortRows(items.data ?? [], itemSort.sort, itemColumns), [items.data, itemSort.sort, itemColumns]);
 
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState(watchlist.name);
@@ -203,18 +255,17 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
           </div>
         ) : (
           <>
-            <div className={`${ROW_GRID} hidden border-b border-slate-200 md:grid dark:border-slate-800`}>
-              <span className="th px-0">Stock</span>
-              <span className="th px-0 text-right">LTP</span>
-              <span className="th px-0 text-right">Day</span>
-              <span className="th px-0" title="How long you've held it, from the buying date">
-                Held
-              </span>
-              <span className="th px-0">Alerts</span>
+            <SortSelect className="border-b border-slate-200 p-3 md:hidden dark:border-slate-800" options={ITEM_SORT_OPTIONS} sort={itemSort.sort} onChange={itemSort.set} defaultLabel="Order added" />
+            <div role="row" className={`${ROW_GRID} hidden border-b border-slate-200 md:grid dark:border-slate-800`}>
+              <SortHeader as="div" className="px-0" label="Stock" sortKey="symbol" sort={itemSort.sort} onToggle={itemSort.toggle} />
+              <SortHeader as="div" className="px-0" align="right" label="LTP" sortKey="ltp" sort={itemSort.sort} onToggle={itemSort.toggle} />
+              <SortHeader as="div" className="px-0" align="right" label="Day" sortKey="day" sort={itemSort.sort} onToggle={itemSort.toggle} />
+              <SortHeader as="div" className="px-0" label="Held" sortKey="held" sort={itemSort.sort} onToggle={itemSort.toggle} title="How long you've held it, from the buying date" />
+              <SortHeader as="div" className="px-0" label="Alerts" sortKey="alerts" sort={itemSort.sort} onToggle={itemSort.toggle} />
               <span className="sr-only">Actions</span>
             </div>
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-              {items.data.map((item) => (
+              {sortedItems.map((item) => (
                 <ItemRow key={item.id} item={item} watchlistName={watchlist.name} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
               ))}
             </ul>
