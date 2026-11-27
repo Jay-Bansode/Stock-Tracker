@@ -11,7 +11,9 @@ import { usePrices } from "../prices";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
 
 // Desktop columns: Stock | LTP | Day | Held | Alerts | Remove. Shared by the header and every row.
-const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_5.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
+// The header and each row are separate grids, so every track must be fixed or fr: a content-sized
+// ("auto") track would be 0 px in the header but button-wide in rows, shifting the columns.
+const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_5.5rem_minmax(0,2fr)_5rem] md:gap-x-3 md:px-3";
 const ROW_GRID = `grid ${ROW_GRID_MD}`;
 
 function useInvalidate() {
