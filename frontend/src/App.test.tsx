@@ -129,6 +129,24 @@ describe("signed-out pages", () => {
     expect(await screen.findByRole("button", { name: "Set new password" })).toBeInTheDocument();
   });
 
+  it("opens Change email with a blank box and only saves a different address", async () => {
+    mockServer();
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: "Change email" }));
+    const box = screen.getByLabelText("New email");
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(box).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "pw" } });
+    expect(save).toBeDisabled();
+
+    fireEvent.change(box, { target: { value: "Admin@Example.com " } });
+    expect(save).toBeDisabled();
+    expect(screen.getByText("That's already your email.")).toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: "new@example.com" } });
+    expect(save).toBeEnabled();
+  });
+
   it("shows the account and Telegram cards in settings", async () => {
     mockServer();
     renderApp();
