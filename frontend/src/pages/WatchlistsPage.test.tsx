@@ -131,4 +131,14 @@ describe("WatchlistsPage", () => {
       expect(patched).toEqual([{ url: "/api/watchlists/1/items/11", body: { bought_on: "2025-01-15" } }]),
     );
   });
+
+  it("gives the header and every row the same fixed column grid, so columns line up", async () => {
+    renderPage();
+    const template = (el: Element) => [...el.classList].find((c) => c.startsWith("md:grid-cols-"));
+    const row = (await rowOf("RELIANCE")).firstElementChild!;
+    const header = screen.getByTitle("How long you've held it, from the buying date").parentElement!;
+    expect(template(header)).toBeDefined();
+    expect(template(row)).toBe(template(header));
+    expect(template(header)).not.toMatch(/auto/); // content-sized tracks differ per grid
+  });
 });
