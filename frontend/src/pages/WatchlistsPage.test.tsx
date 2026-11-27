@@ -163,6 +163,10 @@ describe("WatchlistsPage", () => {
     expect(shownSymbols()).toEqual(["RELIANCE", "HDFCBANK"]);
     expect(stock.closest("[aria-sort]")).toHaveAttribute("aria-sort", "descending");
 
+    // Icons are SVG, not ▲▼↕ text: fallback-font glyphs shifted headings up and down.
+    expect(stock.querySelector("svg")).not.toBeNull();
+    expect(stock.textContent).toBe("Stock");
+
     fireEvent.click(stock); // third click: back to the order added
     expect(stock.closest("[aria-sort]")).toHaveAttribute("aria-sort", "none");
 
