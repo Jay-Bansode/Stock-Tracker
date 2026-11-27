@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from datetime import date, datetime, time
 from functools import lru_cache
 from typing import Literal
@@ -71,6 +73,9 @@ class Settings(BaseSettings):
     # Notifications
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""  # seeds the admin's chat; other users link theirs in Settings
+    # How the bot receives messages (commands, button taps, /start links):
+    # auto = webhook on free hosting (cron mode + https APP_BASE_URL), polling otherwise.
+    telegram_mode: Literal["auto", "webhook", "polling", "off"] = "auto"
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
     whatsapp_to: str = ""
@@ -104,6 +109,21 @@ class Settings(BaseSettings):
     def telegram_enabled(self) -> bool:
         """The bot is configured. Each user's chat id is stored on their account."""
         return bool(self.telegram_bot_token)
+
+    @property
+    def telegram_transport(self) -> Literal["webhook", "polling"] | None:
+        if not self.telegram_bot_token or self.telegram_mode == "off":
+            return None
+        if self.telegram_mode != "auto":
+            return self.telegram_mode
+        if self.run_mode == "cron":
+            return "webhook" if self.app_base_url.startswith("https://") else None
+        return "polling"
+
+    @property
+    def telegram_webhook_secret(self) -> str:
+        """Telegram echoes this in X-Telegram-Bot-Api-Secret-Token on every webhook call."""
+        return hmac.new(self.secret_key.encode(), b"telegram-webhook", hashlib.sha256).hexdigest()
 
     @property
     def whatsapp_enabled(self) -> bool:

@@ -9,7 +9,7 @@ def build_senders(settings: Settings) -> dict[str, Sender]:
     if settings.telegram_enabled:
         senders["TELEGRAM"] = TelegramSender(
             settings.telegram_bot_token, settings.telegram_chat_id,
-            api_base=settings.telegram_api_base,
+            api_base=settings.telegram_api_base, app_url=settings.app_base_url,
         )
     if settings.whatsapp_enabled:
         senders["WHATSAPP"] = WhatsAppSender(

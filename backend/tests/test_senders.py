@@ -4,7 +4,10 @@ import respx
 
 from app.notify.base import SendError
 from app.notify.formatter import sample_message
-from app.notify.telegram import TelegramSender, find_start_code
+import json
+from dataclasses import replace
+
+from app.notify.telegram import TelegramSender, alert_buttons
 from app.notify.whatsapp import WhatsAppSender
 
 TG_URL = "https://api.telegram.org/botTOKEN/sendMessage"
@@ -35,14 +38,29 @@ async def test_telegram_recipient_overrides_default_chat():
 
 
 @respx.mock
-async def test_find_start_code_matches_only_that_code():
-    respx.get("https://api.telegram.org/botTOKEN/getUpdates").mock(return_value=httpx.Response(
-        200, json={"ok": True, "result": [
-            {"update_id": 1, "message": {"text": "/start other", "chat": {"id": 1}}},
-            {"update_id": 2, "message": {"text": "/start abc123", "chat": {"id": 42}}},
-        ]}))
-    assert await find_start_code("TOKEN", "abc123") == "42"
-    assert await find_start_code("TOKEN", "missing") is None
+async def test_alert_message_has_rearm_and_disable_buttons():
+    route = respx.post(TG_URL).mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+    )
+    msg = replace(sample_message(), alert_id=42)
+    await TelegramSender("TOKEN", "123", app_url="https://tracker.example.com").send_alert(msg)
+    keyboard = json.loads(route.calls.last.request.read())["reply_markup"]["inline_keyboard"]
+    assert [b["callback_data"] for b in keyboard[0]] == ["rearm:42", "disable:42"]
+    assert keyboard[1][0]["url"] == "https://tracker.example.com/alerts"
+
+    await TelegramSender("TOKEN", "123", app_url="http://localhost:8080").send_alert(msg)
+    keyboard = json.loads(route.calls.last.request.read())["reply_markup"]["inline_keyboard"]
+    assert len(keyboard) == 1  # Telegram rejects non-https link buttons
+
+    await TelegramSender("TOKEN", "123").send_alert(sample_message())  # test message: no alert id
+    assert "reply_markup" not in json.loads(route.calls.last.request.read())
+
+
+def test_buttons_follow_the_alert_state():
+    data = lambda status: [b["callback_data"] for b in alert_buttons(5, status)[0]]  # noqa: E731
+    assert data("TRIGGERED") == ["rearm:5", "disable:5"]
+    assert data("ACTIVE") == ["disable:5"]
+    assert data("DISABLED") == ["rearm:5"]
 
 
 @respx.mock

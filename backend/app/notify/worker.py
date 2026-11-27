@@ -175,11 +175,30 @@ async def main() -> None:
 
     await conn.add_listener(CHANNEL_OUTBOX, wake_all)
     log.info("notifier running for channels: %s", [w.channel for w in workers] or "none")
+    poller = _bot_poller(settings, sm)
     try:
         async with asyncio.TaskGroup() as tg:
             for w in workers:
                 tg.create_task(w.run())
-            if not workers:
+            if poller:
+                tg.create_task(poller.run())
+            if not workers and not poller:
                 tg.create_task(asyncio.Event().wait())
     finally:
         await conn.close()
+
+
+def _bot_poller(settings, sm):
+    """Polling mode (Docker / no public URL): this process also answers bot commands."""
+    if settings.telegram_transport != "polling":
+        return None
+    from redis.asyncio import Redis
+
+    from app.bot import BotPoller, bot_api
+    from app.bot.handlers import Bot
+    from app.runtime.store import PgStore, RedisStore
+
+    store = (RedisStore(Redis.from_url(settings.redis_url, decode_responses=True))
+             if settings.run_mode == "services" else PgStore(sm))
+    api = bot_api(settings.telegram_bot_token, settings.telegram_api_base)
+    return BotPoller(api, Bot(sm, store, api, settings).handle)
