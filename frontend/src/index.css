@@ -77,3 +77,16 @@ body {
 }
 .flash-up { animation: flash-up 0.9s ease-out; }
 .flash-down { animation: flash-down 0.9s ease-out; }
+
+/* Confirm dialog: quick fade + lift in. */
+@keyframes dialog-fade {
+  from { opacity: 0; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+}
+.dialog-backdrop { animation: dialog-fade 0.15s ease-out; }
+.dialog-panel { animation: dialog-in 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .dialog-backdrop, .dialog-panel { animation: none; }
+}

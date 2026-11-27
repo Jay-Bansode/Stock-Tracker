@@ -88,6 +88,8 @@ export const api = {
   items: (watchlistId: number) => request<WatchlistItem[]>("GET", `/watchlists/${watchlistId}/items`),
   addItem: (watchlistId: number, instrument_key: string) =>
     request<WatchlistItem>("POST", `/watchlists/${watchlistId}/items`, { instrument_key }),
+  updateItem: (watchlistId: number, itemId: number, patch: { bought_on: string | null }) =>
+    request<WatchlistItem>("PATCH", `/watchlists/${watchlistId}/items/${itemId}`, patch),
   removeItem: (watchlistId: number, itemId: number) =>
     request<void>("DELETE", `/watchlists/${watchlistId}/items/${itemId}`),
 

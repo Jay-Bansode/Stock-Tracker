@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { ErrorText } from "../components/ui";
 import { formatIST, timeAgo } from "../format";
 import { ME_KEY } from "../queryClient";
@@ -166,7 +167,8 @@ function AccountCard({ me }: { me: Me }) {
   const [editing, setEditing] = useState<"" | "password" | "email">("");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
-  const [email, setEmail] = useState(me.email);
+  const [email, setEmail] = useState(""); // blank: the current email is shown in the row above
+  const sameEmail = email.trim().toLowerCase() === me.email.toLowerCase();
   const close = () => {
     setEditing("");
     setCurrent("");
@@ -185,7 +187,7 @@ function AccountCard({ me }: { me: Me }) {
   };
   const open = (what: "password" | "email") => {
     save.reset();
-    setEmail(me.email);
+    setEmail("");
     setEditing(what);
   };
 
@@ -200,14 +202,17 @@ function AccountCard({ me }: { me: Me }) {
       {editing ? (
         <form onSubmit={submit} className="space-y-2 pt-3">
           {editing === "email" ? (
-            <input className="input" type="email" autoComplete="email" aria-label="New email" placeholder="New email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <>
+              <input className="input" type="email" autoComplete="email" autoFocus aria-label="New email" placeholder="New email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              {sameEmail && <p className="text-xs text-slate-500">That's already your email.</p>}
+            </>
           ) : (
             <input className="input" type="password" autoComplete="new-password" aria-label="New password" placeholder="New password (8+ characters)" minLength={8} maxLength={72} value={next} onChange={(e) => setNext(e.target.value)} />
           )}
           <input className="input" type="password" autoComplete="current-password" aria-label="Current password" placeholder="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} />
           <ErrorText error={save.error} />
           <div className="flex gap-2">
-            <button className="btn btn-primary btn-sm" disabled={save.isPending || !current || (editing === "password" ? next.length < 8 : !email.trim())}>
+            <button className="btn btn-primary btn-sm" disabled={save.isPending || !current || (editing === "password" ? next.length < 8 : !email.trim() || sameEmail)}>
               {save.isPending ? "Saving…" : "Save"}
             </button>
             <button type="button" className="btn btn-sm" onClick={close}>
@@ -232,6 +237,7 @@ function AccountCard({ me }: { me: Me }) {
 
 function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean }) {
   const [, setMe] = useMe();
+  const confirm = useConfirm();
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const link = useMutation({
     mutationFn: api.telegramLink,
@@ -271,7 +277,19 @@ function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean })
             <button className="btn btn-sm" disabled={test.isPending} onClick={() => test.mutate()}>
               {test.isPending ? "Sending…" : "Send test"}
             </button>
-            <button className="btn btn-sm" disabled={unlink.isPending} onClick={() => unlink.mutate()}>
+            <button
+              className="btn btn-sm"
+              disabled={unlink.isPending}
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Disconnect Telegram?",
+                  message: "You'll stop getting alert messages until you connect again.",
+                  confirmLabel: "Disconnect",
+                  danger: true,
+                });
+                if (ok) unlink.mutate();
+              }}
+            >
               Disconnect
             </button>
           </div>

@@ -3,14 +3,15 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "../api";
 import { AlertForm } from "../components/AlertForm";
+import { useConfirm } from "../components/ConfirmDialog";
 import { InstrumentSearch } from "../components/InstrumentSearch";
 import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
-import { dayChangePct, exchangeOf, formatIST, formatINR, formatWindow } from "../format";
+import { dayChangePct, exchangeOf, formatDate, formatIST, formatINR, formatWindow, heldFor, todayIST } from "../format";
 import { usePrices } from "../prices";
 import type { Alert, AlertInput, Price, Watchlist, WatchlistItem } from "../types";
 
-// Desktop columns: Stock | LTP | Day | Alerts | Remove. Shared by the header and every row.
-const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
+// Desktop columns: Stock | LTP | Day | Held | Alerts | Remove. Shared by the header and every row.
+const ROW_GRID_MD = "md:grid-cols-[minmax(0,1.3fr)_6.5rem_4.5rem_5.5rem_minmax(0,2fr)_auto] md:gap-x-3 md:px-3";
 const ROW_GRID = `grid ${ROW_GRID_MD}`;
 
 function useInvalidate() {
@@ -112,6 +113,7 @@ function Sidebar({ lists, selectedId }: { lists: Watchlist[]; selectedId?: numbe
 function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
   const navigate = useNavigate();
   const invalidate = useInvalidate();
+  const confirm = useConfirm();
   const items = useQuery({ queryKey: ["items", watchlist.id], queryFn: () => api.items(watchlist.id) });
   const keys = useMemo(() => (items.data ?? []).map((i) => i.instrument.instrument_key), [items.data]);
   const prices = usePrices(keys);
@@ -169,8 +171,14 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
           )}
           <button
             className="btn btn-sm btn-danger"
-            onClick={() => {
-              if (confirm(`Delete “${watchlist.name}” and all its alerts? Alert history is kept.`)) remove.mutate();
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Delete “${watchlist.name}”?`,
+                message: "All its stocks and alerts are removed. Alert history is kept.",
+                confirmLabel: "Delete",
+                danger: true,
+              });
+              if (ok) remove.mutate();
             }}
           >
             Delete
@@ -197,12 +205,15 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
               <span className="th px-0">Stock</span>
               <span className="th px-0 text-right">LTP</span>
               <span className="th px-0 text-right">Day</span>
+              <span className="th px-0" title="How long you've held it, from the buying date">
+                Held
+              </span>
               <span className="th px-0">Alerts</span>
               <span className="sr-only">Actions</span>
             </div>
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
               {items.data.map((item) => (
-                <ItemRow key={item.id} item={item} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
+                <ItemRow key={item.id} item={item} watchlistName={watchlist.name} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
               ))}
             </ul>
           </>
@@ -212,8 +223,20 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
   );
 }
 
-function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Price; onChanged: () => Promise<unknown> }) {
-  const [editing, setEditing] = useState<"new" | number | null>(null);
+function ItemRow({
+  item,
+  watchlistName,
+  price,
+  onChanged,
+}: {
+  item: WatchlistItem;
+  watchlistName: string;
+  price?: Price;
+  onChanged: () => Promise<unknown>;
+}) {
+  const confirm = useConfirm();
+  // What's open under the row: a new alert, an existing alert (its id), or the buying date.
+  const [editing, setEditing] = useState<"new" | number | "date" | null>(null);
   const editingAlert: Alert | undefined = typeof editing === "number" ? item.alerts.find((a) => a.id === editing) : undefined;
 
   const done = async () => {
@@ -244,6 +267,9 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
           <div className="truncate text-xs text-slate-500">
             {i.name} · {exchangeOf(i.instrument_key)}
           </div>
+          <div className="mt-0.5 text-xs md:hidden">
+            <HeldButton boughtOn={item.bought_on} onClick={() => setEditing("date")} withLabel />
+          </div>
         </div>
         <div className="flex flex-col items-end text-sm md:contents">
           <div className="md:text-right">
@@ -252,6 +278,9 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
           <div className="text-xs md:text-right md:text-sm">
             <ChangeText pct={dayChangePct(price?.p, price?.c)} />
           </div>
+        </div>
+        <div className="hidden text-sm md:block">
+          <HeldButton boughtOn={item.bought_on} onClick={() => setEditing("date")} />
         </div>
         <div className="col-span-2 flex items-start justify-between gap-2 md:contents">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:py-2.5">
@@ -266,9 +295,17 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
             <button
               className="btn btn-sm btn-danger"
               title="Remove from watchlist"
-              onClick={() => {
-                if (!item.alerts.length || confirm(`Remove ${i.trading_symbol} and its ${item.alerts.length} alert(s) from this watchlist?`))
-                  removeItem.mutate();
+              onClick={async () => {
+                const n = item.alerts.length;
+                const ok = await confirm({
+                  title: `Remove ${i.trading_symbol}?`,
+                  message: n
+                    ? `Its ${n === 1 ? "alert is" : `${n} alerts are`} removed too. Alert history is kept.`
+                    : `It's removed from “${watchlistName}”. You can add it again any time.`,
+                  confirmLabel: "Remove",
+                  danger: true,
+                });
+                if (ok) removeItem.mutate();
               }}
             >
               Remove
@@ -276,7 +313,12 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
           </div>
         </div>
       </div>
-      {editing !== null && (
+      {editing === "date" && (
+        <div className="px-3 pb-3">
+          <BuyDateEditor item={item} onDone={() => setEditing(null)} onChanged={onChanged} />
+        </div>
+      )}
+      {editing !== null && editing !== "date" && (
         <div className="px-3 pb-3">
           {editingAlert && (
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
@@ -300,10 +342,80 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
             error={save.error ?? del.error ?? toggle.error}
             onSubmit={(input) => save.mutate(input)}
             onCancel={() => setEditing(null)}
-            onDelete={editingAlert ? () => del.mutate(editingAlert.id) : undefined}
+            onDelete={
+              editingAlert
+                ? async () => {
+                    const ok = await confirm({ title: "Delete this alert?", message: "Its history is kept.", confirmLabel: "Delete", danger: true });
+                    if (ok) del.mutate(editingAlert.id);
+                  }
+                : undefined
+            }
           />
         </div>
       )}
     </li>
+  );
+}
+
+/** "2y 3m" (tooltip: the buying date), or "+ Buy date" when none is set. */
+function HeldButton({ boughtOn, onClick, withLabel = false }: { boughtOn: string | null; onClick: () => void; withLabel?: boolean }) {
+  const held = heldFor(boughtOn);
+  if (!boughtOn) {
+    return (
+      <button className="text-xs font-medium text-teal-700 hover:underline dark:text-teal-400" onClick={onClick}>
+        + Buy date
+      </button>
+    );
+  }
+  return (
+    <button className="num text-left hover:underline" title={`Bought ${formatDate(boughtOn)} · click to change`} onClick={onClick}>
+      {withLabel && <span className="text-slate-500">Held </span>}
+      <span className="font-medium text-slate-700 dark:text-slate-200">{held || "—"}</span>
+    </button>
+  );
+}
+
+function BuyDateEditor({ item, onDone, onChanged }: { item: WatchlistItem; onDone: () => void; onChanged: () => Promise<unknown> }) {
+  const today = todayIST();
+  const [value, setValue] = useState(item.bought_on ?? "");
+  const save = useMutation({
+    mutationFn: (bought_on: string | null) => api.updateItem(item.watchlist_id, item.id, { bought_on }),
+    onSuccess: async () => {
+      onDone();
+      await onChanged();
+    },
+  });
+  const valid = !!value && value <= today;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (valid) save.mutate(value);
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      onKeyDown={(e) => e.key === "Escape" && onDone()}
+      className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50"
+    >
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-slate-500">Buying date of {item.instrument.trading_symbol}</span>
+        <input className="input num sm:w-44" type="date" autoFocus max={today} min="1990-01-01" required value={value} onChange={(e) => setValue(e.target.value)} />
+      </label>
+      {valid && <span className="pb-2 text-xs text-slate-500">Held {heldFor(value, today)}</span>}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn btn-primary" disabled={!valid || save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="btn" onClick={onDone}>
+          Cancel
+        </button>
+        {item.bought_on && (
+          <button type="button" className="btn btn-danger" disabled={save.isPending} onClick={() => save.mutate(null)}>
+            Clear
+          </button>
+        )}
+      </div>
+      {save.error && <ErrorText error={save.error} />}
+    </form>
   );
 }

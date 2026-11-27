@@ -1,10 +1,11 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -133,6 +134,7 @@ class WatchlistItem(Base):
     watchlist_id: Mapped[int] = mapped_column(ForeignKey("watchlists.id", ondelete="CASCADE"))
     instrument_key: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_key"))
     notes: Mapped[str | None] = mapped_column(Text)
+    bought_on: Mapped[date | None] = mapped_column(Date)  # optional; drives the "Held" column
     added_at: Mapped[datetime] = _ts()
 
     watchlist: Mapped[Watchlist] = relationship(back_populates="items")

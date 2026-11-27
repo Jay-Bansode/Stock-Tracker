@@ -86,3 +86,35 @@ export function inMarketHoursIST(at: Date = new Date()): boolean {
   const minutes = Number(parts.hour) * 60 + Number(parts.minute);
   return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
 }
+
+/** Today's calendar date in India, "YYYY-MM-DD". */
+export function todayIST(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+/**
+ * How long a stock has been held, from its buying date ("YYYY-MM-DD") to today:
+ * "2y 3m" (months always shown once there's a year, so "28y 0m"), "5m" under a year,
+ * "12d" under a month. Whole calendar months (15 Jan → 14 Mar is 1m).
+ * "" for no date or a future one.
+ */
+export function heldFor(boughtOn: string | null | undefined, today: string = todayIST()): string {
+  if (!boughtOn || boughtOn > today) return "";
+  const [by, bm, bd] = boughtOn.split("-").map(Number);
+  const [ty, tm, td] = today.split("-").map(Number);
+  let months = (ty - by) * 12 + (tm - bm);
+  if (td < bd) months -= 1;
+  if (months <= 0) {
+    const days = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(by, bm - 1, bd)) / 86_400_000);
+    return `${days}d`;
+  }
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  return years ? `${years}y ${rest}m` : `${rest}m`;
+}
+
+/** "2024-08-12" -> "12 Aug 2024". */
+export function formatDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(Date.UTC(y, m - 1, d));
+}

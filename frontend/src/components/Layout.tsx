@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router";
 import { api } from "../api";
+import { useConfirm } from "./ConfirmDialog";
 import { inMarketHoursIST, timeAgo } from "../format";
 import { priceStore } from "../prices";
 import { resetSession } from "../queryClient";
@@ -68,6 +69,7 @@ function FeedIndicator() {
 export default function Layout({ username, children }: { username: string; children: ReactNode }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const logout = async () => {
     try {
       await api.logout();
@@ -78,6 +80,15 @@ export default function Layout({ username, children }: { username: string; child
       navigate("/login", { replace: true, state: { signingOut: true } });
       await resetSession(qc);
     }
+  };
+
+  const askSignOut = async () => {
+    const ok = await confirm({
+      title: "Sign out?",
+      message: `You're signed in as ${username}. You'll need your password to sign in again.`,
+      confirmLabel: "Sign out",
+    });
+    if (ok) await logout();
   };
 
   return (
@@ -111,7 +122,7 @@ export default function Layout({ username, children }: { username: string; child
           <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
             <FeedIndicator />
             <span className="hidden max-w-40 truncate text-sm text-slate-600 md:inline dark:text-slate-300">{username}</span>
-            <button className="btn btn-sm shrink-0 whitespace-nowrap" onClick={logout} title={`Signed in as ${username}`}>
+            <button className="btn btn-sm shrink-0 whitespace-nowrap" onClick={askSignOut} title={`Signed in as ${username}`}>
               Sign out
             </button>
           </div>
