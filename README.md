@@ -135,16 +135,38 @@ How the live feed behaves:
 
 ## Telegram setup
 
-One bot serves every user; each user connects their own chat.
+One bot serves every user; each user connects their own chat. The bot is **two-way**: it sends
+alerts and also answers commands.
 
 1. In Telegram, message **@BotFather** → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN`,
    then `docker compose up -d`.
 2. Each user: **Settings → Telegram alerts → Connect Telegram**. This opens the bot; press
-   **Start**, come back and click **I've pressed Start**. Then use **Send test**.
+   **Start** and the card switches to *Connected* by itself. Then use **Send test**.
+
+**In Telegram:**
+
+| Command | Does |
+|---|---|
+| `/price RELIANCE` | Latest price and today's change |
+| `/alerts` | Your alerts and their status |
+| `/add RELIANCE >= 1500` | New alert (also `<=`, `above`, `below`; add `in Long-Term` to pick the watchlist) |
+| `/help` | The list above |
+
+Every alert message has **Re-arm** and **Disable** buttons (and **Open Tracker** when
+`APP_BASE_URL` is an https address).
+
+**How the bot receives messages** (`TELEGRAM_MODE`, default `auto`):
+- **Free hosting (Render, `RUN_MODE=cron`):** a *webhook*. Set `APP_BASE_URL` to your https
+  address; on start-up Tracker tells Telegram to deliver messages to `/api/telegram/webhook`
+  (protected by a secret derived from `SECRET_KEY`).
+- **Docker (`RUN_MODE=services`):** *polling*, run by the `notifier` container; no public URL needed.
+
+A bot can use a webhook **or** polling, not both. If you run a local copy next to your hosted one,
+give the local copy its **own test bot** (another `/newbot`); sharing one token makes them take the
+bot from each other.
 
 Users who haven't connected Telegram still see their alerts fire in **History**; no message is
-sent. Don't set a webhook on the bot: connecting reads the bot's recent messages
-(`getUpdates`), which Telegram disables while a webhook is set.
+sent.
 
 ## WhatsApp setup (Meta WhatsApp Cloud API)
 

@@ -43,6 +43,7 @@ class AlertMessage:
     current: Decimal
     at: datetime
     status: str = STATUS_HIT
+    alert_id: int | None = None  # enables the Re-arm / Disable buttons on Telegram
 
     @classmethod
     def from_event(cls, e: AlertEvent) -> "AlertMessage":
@@ -55,6 +56,7 @@ class AlertMessage:
             target=e.target_price,
             current=e.trigger_price,
             at=e.exchange_ts or e.triggered_at,
+            alert_id=e.alert_id,
         )
 
     @property

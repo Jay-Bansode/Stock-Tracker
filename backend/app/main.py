@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
-from app.api import account, alerts, auth, cron, history, instruments, system, watchlists, ws
+from app.api import account, alerts, auth, cron, history, instruments, system, telegram, watchlists, ws
+from app.bot import bot_api
+from app.notify.base import SendError
 from app.api.deps import current_user
 from app.config import get_settings
 from app.db.session import get_sessionmaker
@@ -41,11 +43,26 @@ async def lifespan(app: FastAPI):
         app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
         app.state.store = RedisStore(app.state.redis)
         task = None
+    webhook_task = None
+    if settings.telegram_transport == "webhook":
+        webhook_task = asyncio.create_task(_register_webhook(settings))
     yield
-    if task:
-        task.cancel()
+    for t in (task, webhook_task):
+        if t:
+            t.cancel()
     if app.state.redis is not None:
         await app.state.redis.aclose()
+
+
+async def _register_webhook(settings) -> None:
+    """Point the bot at this server, so Telegram delivers commands and button taps here."""
+    url = f"{settings.app_base_url.rstrip('/')}/api/telegram/webhook"
+    try:
+        await bot_api(settings.telegram_bot_token, settings.telegram_api_base).set_webhook(
+            url, settings.telegram_webhook_secret)
+        log.info("telegram webhook set: %s", url)
+    except SendError as exc:
+        log.error("could not set telegram webhook (%s): %s", url, exc)
 
 
 def _mount_frontend(app: FastAPI, dist: Path) -> None:
@@ -83,6 +100,8 @@ def create_app() -> FastAPI:
         api.include_router(module.router, dependencies=protected)
     if settings.run_mode == "cron":
         api.include_router(cron.router)  # guarded by X-Cron-Secret, not the login cookie
+    if settings.telegram_enabled:
+        api.include_router(telegram.router)  # guarded by Telegram's secret token header
     app.include_router(api)
     app.include_router(ws.router)
 

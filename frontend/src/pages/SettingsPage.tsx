@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { useConfirm } from "../components/ConfirmDialog";
 import { ErrorText } from "../components/ui";
@@ -256,6 +256,27 @@ function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean })
   const unlink = useMutation({ mutationFn: api.telegramUnlink, onSuccess: setMe });
   const test = useMutation({ mutationFn: () => api.testNotification("TELEGRAM") });
 
+  // The bot links the chat the moment Start is pressed, so watch for it for a couple of minutes.
+  useEffect(() => {
+    if (!linkUrl) return;
+    const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started > 120_000) return clearInterval(timer);
+      try {
+        const m = await api.me();
+        if (m.telegram_linked) {
+          clearInterval(timer);
+          setLinkUrl(null);
+          setMe(m);
+        }
+      } catch {
+        /* keep waiting */
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setMe is recreated each render; only a new link restarts the wait
+  }, [linkUrl]);
+
   return (
     <div className="card space-y-3 p-4">
       <div>
@@ -293,6 +314,22 @@ function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean })
               Disconnect
             </button>
           </div>
+          <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
+            <p className="mb-1.5 font-medium text-slate-700 dark:text-slate-200">Try these in Telegram</p>
+            <ul className="space-y-1">
+              {[
+                ["/price RELIANCE", "latest price"],
+                ["/alerts", "your alerts"],
+                ["/add RELIANCE >= 1500", "new alert"],
+              ].map(([cmd, what]) => (
+                <li key={cmd}>
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[0.7rem] text-slate-800 dark:bg-slate-900 dark:text-slate-100">{cmd}</code>{" "}
+                  <span className="text-slate-500">{what}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-slate-500">Alert messages also have Re-arm and Disable buttons.</p>
+          </div>
           {test.isSuccess && <p className="text-xs text-emerald-700 dark:text-emerald-400">Sent. Check Telegram.</p>}
           <ErrorText error={test.error ?? unlink.error} />
         </>
@@ -305,10 +342,14 @@ function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean })
                 Open the bot again
               </a>
             </li>
-            <li>Come back here and confirm.</li>
+            <li>That's it: this card updates by itself within a few seconds.</li>
           </ol>
+          <p className="text-xs text-slate-500" role="status">
+            <span className="mr-1.5 inline-block size-2 animate-pulse rounded-full bg-teal-500" aria-hidden />
+            Waiting for you to press Start…
+          </p>
           <button className="btn btn-primary btn-sm" disabled={verify.isPending} onClick={() => verify.mutate()}>
-            {verify.isPending ? "Checking…" : "I've pressed Start"}
+            {verify.isPending ? "Checking…" : "I've pressed Start — check now"}
           </button>
           <ErrorText error={verify.error} />
         </>

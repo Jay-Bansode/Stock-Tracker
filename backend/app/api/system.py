@@ -15,7 +15,6 @@ from app.db.models import (
     Alert,
     AlertEvent,
     AlertStatus,
-    Instrument,
     Watchlist,
     WatchlistItem,
 )
@@ -26,6 +25,7 @@ from app.notify import build_senders
 from app.notify.base import SendError
 from app.notify.formatter import sample_message
 from app.runtime.store import PgStore
+from app.services.instruments import resolve_instrument
 
 router = APIRouter(tags=["system"])
 
@@ -111,15 +111,8 @@ async def inject_ticks(session: SessionDep, redis: RedisDep, settings: SettingsD
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only available with the simulated provider")
     resolved = []
     for ref, price in prices.items():
-        if "|" in ref:
-            key = ref if await session.get(Instrument, ref) else None
-        else:
-            key = await session.scalar(
-                select(Instrument.instrument_key)
-                .where(func.upper(Instrument.trading_symbol) == ref.upper())
-                .order_by(case((Instrument.segment == "NSE_EQ", 0), else_=1))
-                .limit(1)
-            )
+        inst = await resolve_instrument(session, ref)
+        key = inst.instrument_key if inst else None
         if key is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown instrument {ref}")
         resolved.append({"k": key, "p": str(price)})

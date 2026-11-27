@@ -13,8 +13,7 @@ from app.api.deps import (
 )
 from app.api.schemas import ChangeEmailIn, Me
 from app.db.models import User
-from app.notify.base import SendError
-from app.notify.telegram import TelegramLinkError, TelegramSender, bot_username, find_start_code
+from app.notify.telegram import TelegramLinkError, bot_username
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -58,28 +57,13 @@ async def telegram_link(user: CurrentUser, session: SessionDep, settings: Settin
 
 
 @router.post("/telegram/verify", response_model=Me)
-async def telegram_verify(user: CurrentUser, session: SessionDep, settings: SettingsDep):
-    """Finish linking: find the /start message carrying this user's code."""
-    token = _require_bot(settings)
-    if not user.telegram_link_code:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Click Connect Telegram first")
-    try:
-        chat_id = await find_start_code(token, user.telegram_link_code,
-                                        settings.telegram_api_base)
-    except TelegramLinkError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
-    if chat_id is None:
+async def telegram_verify(user: CurrentUser, settings: SettingsDep):
+    """Has the bot linked this account yet? Pressing Start in Telegram links it instantly (the bot
+    receives the /start <code> message), so this only reports the current state."""
+    _require_bot(settings)
+    if not user.telegram_chat_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
-                            "No Start message found yet. Open the link, press Start in "
-                            "Telegram, then try again.")
-    user.telegram_chat_id, user.telegram_link_code = chat_id, None
-    await session.commit()
-    try:
-        await TelegramSender(token, api_base=settings.telegram_api_base).send_text(
-            f"✅ Connected to Tracker as {user.username}. Your price alerts will arrive here.",
-            to=chat_id)
-    except SendError:
-        pass  # linked either way; the Settings page has a test button
+                            "Not connected yet. Open the link, press Start in Telegram, then try again.")
     return Me.of(user)
 
 
