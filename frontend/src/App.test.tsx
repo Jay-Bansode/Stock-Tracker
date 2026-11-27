@@ -1,8 +1,9 @@
 import { focusManager, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { ConfirmProvider } from "./components/ConfirmDialog";
 import { makeQueryClient } from "./queryClient";
 
 const status = {
@@ -53,8 +54,10 @@ function renderApp(path = "/settings") {
   render(
     <QueryClientProvider client={makeQueryClient()}>
       <MemoryRouter initialEntries={[path]}>
-        <App />
-        <CurrentPath />
+        <ConfirmProvider>
+          <App />
+          <CurrentPath />
+        </ConfirmProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -67,6 +70,8 @@ describe("session handling", () => {
     mockServer();
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Sign out?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByText("Not signed in")).not.toBeInTheDocument();
     // a background refresh may show the form a moment before the redirect lands
@@ -79,6 +84,18 @@ describe("session handling", () => {
     expect(await screen.findByRole("button", { name: "Sign out" })).toBeInTheDocument();
     // the redirect from /login runs in an effect right after that render
     await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent("/watchlists"));
+  });
+
+  it("stays signed in when sign-out is cancelled", async () => {
+    const server = mockServer();
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Sign out?" });
+    expect(dialog).toHaveTextContent("You're signed in as admin");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(server.signedIn).toBe(true); // no /api/auth/logout call
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
   it("returns to the login page when the session expires mid-use", async () => {

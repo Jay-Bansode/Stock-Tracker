@@ -1,7 +1,8 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConfirmProvider } from "../components/ConfirmDialog";
 import { makeQueryClient } from "../queryClient";
 import WatchlistsPage from "./WatchlistsPage";
 
@@ -27,9 +28,14 @@ const items = [
 ];
 
 function renderPage() {
+  const deleted: string[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deleted.push(url);
+        return new Response(null, { status: 204 });
+      }
       const body = url === "/api/watchlists" ? watchlists : url === "/api/watchlists/1/items" ? items : null;
       if (body === null) throw new Error(`unexpected ${url}`);
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -38,13 +44,18 @@ function renderPage() {
   render(
     <QueryClientProvider client={makeQueryClient()}>
       <MemoryRouter initialEntries={["/watchlists/1"]}>
-        <Routes>
-          <Route path="/watchlists/:id" element={<WatchlistsPage />} />
-        </Routes>
+        <ConfirmProvider>
+          <Routes>
+            <Route path="/watchlists/:id" element={<WatchlistsPage />} />
+          </Routes>
+        </ConfirmProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return deleted;
 }
+
+const rowOf = async (symbol: string) => (await screen.findByText(symbol)).closest("li")!;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -71,5 +82,30 @@ describe("WatchlistsPage", () => {
     renderPage();
     expect(await screen.findByRole("button", { name: /Intraday/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Long-Term/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("asks in an in-app dialog before removing a stock that has alerts", async () => {
+    const deleted = renderPage();
+    fireEvent.click(within(await rowOf("RELIANCE")).getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Remove RELIANCE?" });
+    expect(dialog).toHaveTextContent("Its alert is removed too");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(deleted).toEqual([]);
+
+    fireEvent.click(within(await rowOf("RELIANCE")).getByRole("button", { name: "Remove" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(deleted).toEqual(["/api/watchlists/1/items/10"]));
+  });
+
+  it("asks before removing a stock without alerts too", async () => {
+    const deleted = renderPage();
+    fireEvent.click(within(await rowOf("HDFCBANK")).getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Remove HDFCBANK?" });
+    expect(dialog).toHaveTextContent("It's removed from “Long-Term”. You can add it again any time.");
+    expect(deleted).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(deleted).toEqual(["/api/watchlists/1/items/11"]));
   });
 });

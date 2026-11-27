@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "../api";
 import { AlertForm } from "../components/AlertForm";
+import { useConfirm } from "../components/ConfirmDialog";
 import { InstrumentSearch } from "../components/InstrumentSearch";
 import { AlertChip, ChangeText, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
 import { dayChangePct, exchangeOf, formatIST, formatINR, formatWindow } from "../format";
@@ -112,6 +113,7 @@ function Sidebar({ lists, selectedId }: { lists: Watchlist[]; selectedId?: numbe
 function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
   const navigate = useNavigate();
   const invalidate = useInvalidate();
+  const confirm = useConfirm();
   const items = useQuery({ queryKey: ["items", watchlist.id], queryFn: () => api.items(watchlist.id) });
   const keys = useMemo(() => (items.data ?? []).map((i) => i.instrument.instrument_key), [items.data]);
   const prices = usePrices(keys);
@@ -169,8 +171,14 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
           )}
           <button
             className="btn btn-sm btn-danger"
-            onClick={() => {
-              if (confirm(`Delete “${watchlist.name}” and all its alerts? Alert history is kept.`)) remove.mutate();
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Delete “${watchlist.name}”?`,
+                message: "All its stocks and alerts are removed. Alert history is kept.",
+                confirmLabel: "Delete",
+                danger: true,
+              });
+              if (ok) remove.mutate();
             }}
           >
             Delete
@@ -202,7 +210,7 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
             </div>
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
               {items.data.map((item) => (
-                <ItemRow key={item.id} item={item} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
+                <ItemRow key={item.id} item={item} watchlistName={watchlist.name} price={prices.get(item.instrument.instrument_key)} onChanged={invalidate} />
               ))}
             </ul>
           </>
@@ -212,7 +220,18 @@ function WatchlistDetail({ watchlist }: { watchlist: Watchlist }) {
   );
 }
 
-function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Price; onChanged: () => Promise<unknown> }) {
+function ItemRow({
+  item,
+  watchlistName,
+  price,
+  onChanged,
+}: {
+  item: WatchlistItem;
+  watchlistName: string;
+  price?: Price;
+  onChanged: () => Promise<unknown>;
+}) {
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<"new" | number | null>(null);
   const editingAlert: Alert | undefined = typeof editing === "number" ? item.alerts.find((a) => a.id === editing) : undefined;
 
@@ -266,9 +285,17 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
             <button
               className="btn btn-sm btn-danger"
               title="Remove from watchlist"
-              onClick={() => {
-                if (!item.alerts.length || confirm(`Remove ${i.trading_symbol} and its ${item.alerts.length} alert(s) from this watchlist?`))
-                  removeItem.mutate();
+              onClick={async () => {
+                const n = item.alerts.length;
+                const ok = await confirm({
+                  title: `Remove ${i.trading_symbol}?`,
+                  message: n
+                    ? `Its ${n === 1 ? "alert is" : `${n} alerts are`} removed too. Alert history is kept.`
+                    : `It's removed from “${watchlistName}”. You can add it again any time.`,
+                  confirmLabel: "Remove",
+                  danger: true,
+                });
+                if (ok) removeItem.mutate();
               }}
             >
               Remove
@@ -300,7 +327,14 @@ function ItemRow({ item, price, onChanged }: { item: WatchlistItem; price?: Pric
             error={save.error ?? del.error ?? toggle.error}
             onSubmit={(input) => save.mutate(input)}
             onCancel={() => setEditing(null)}
-            onDelete={editingAlert ? () => del.mutate(editingAlert.id) : undefined}
+            onDelete={
+              editingAlert
+                ? async () => {
+                    const ok = await confirm({ title: "Delete this alert?", message: "Its history is kept.", confirmLabel: "Delete", danger: true });
+                    if (ok) del.mutate(editingAlert.id);
+                  }
+                : undefined
+            }
           />
         </div>
       )}

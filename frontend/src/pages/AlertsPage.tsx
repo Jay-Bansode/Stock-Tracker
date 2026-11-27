@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { conditionSymbol, EmptyState, ErrorText, PriceCell, StatusBadge } from "../components/ui";
 import { distancePct, exchangeOf, formatINR, formatIST, formatPct, formatWindow } from "../format";
 import { usePrices } from "../prices";
@@ -187,6 +188,16 @@ function TargetText({ a }: { a: AlertWithContext }) {
 }
 
 function Actions({ a, onAct }: { a: AlertWithContext; onAct: (action: "rearm" | "disable" | "delete") => void }) {
+  const confirm = useConfirm();
+  const askDelete = async () => {
+    const ok = await confirm({
+      title: "Delete this alert?",
+      message: `${a.instrument.trading_symbol} ${conditionSymbol(a.condition)} ${formatINR(a.target_price)} · ${a.watchlist_name}. Its history is kept.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) onAct("delete");
+  };
   return (
     <span className="inline-flex gap-2">
       {a.status === "ACTIVE" ? (
@@ -198,7 +209,7 @@ function Actions({ a, onAct }: { a: AlertWithContext; onAct: (action: "rearm" | 
           Re-arm
         </button>
       )}
-      <button className="btn btn-sm btn-danger" onClick={() => confirm("Delete this alert? Its history is kept.") && onAct("delete")}>
+      <button className="btn btn-sm btn-danger" onClick={askDelete}>
         Delete
       </button>
     </span>

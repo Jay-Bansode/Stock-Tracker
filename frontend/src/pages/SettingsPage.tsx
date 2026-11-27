@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { ErrorText } from "../components/ui";
 import { formatIST, timeAgo } from "../format";
 import { ME_KEY } from "../queryClient";
@@ -232,6 +233,7 @@ function AccountCard({ me }: { me: Me }) {
 
 function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean }) {
   const [, setMe] = useMe();
+  const confirm = useConfirm();
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const link = useMutation({
     mutationFn: api.telegramLink,
@@ -271,7 +273,19 @@ function TelegramCard({ me, botConfigured }: { me: Me; botConfigured: boolean })
             <button className="btn btn-sm" disabled={test.isPending} onClick={() => test.mutate()}>
               {test.isPending ? "Sending…" : "Send test"}
             </button>
-            <button className="btn btn-sm" disabled={unlink.isPending} onClick={() => unlink.mutate()}>
+            <button
+              className="btn btn-sm"
+              disabled={unlink.isPending}
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Disconnect Telegram?",
+                  message: "You'll stop getting alert messages until you connect again.",
+                  confirmLabel: "Disconnect",
+                  danger: true,
+                });
+                if (ok) unlink.mutate();
+              }}
+            >
               Disconnect
             </button>
           </div>
